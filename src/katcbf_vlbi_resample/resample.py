@@ -1,17 +1,81 @@
 # Copyright (c) 2024, National Research Foundation (SARAO)
 
-"""Resample to a different frequency and split into sidebands."""
+"""Signal processing algorithms."""
 
+from collections.abc import Sequence
 from fractions import Fraction
 from typing import Iterable, Iterator, Self
 
 import numpy as np
-import pandas as pd
 import scipy.signal
 import xarray as xr
 
 from . import xrsig
 from .parameters import ResampleParameters, StreamParameters
+
+
+class ClipTime:
+    """Iterator adapter that limits the selected time range.
+
+    Note that it's generally more efficient if the upstream iterator
+    can do the work. However, this adapter is convenient for clipping
+    to sample accuracy after the upstream clips to chunk accuracy.
+
+    The range to select is based on sample indices, as given by
+    the `time_bias` attribute on chunks. Note that it will only
+    clip to a whole sample if `time_bias` is non-integral.
+    """
+
+    def __init__(self, input_data: Iterable[xr.DataArray], start: int, stop: int) -> None:
+        self._start = start
+        self._stop = stop
+        self._input_it = iter(input_data)
+
+    def __iter__(self) -> Self:
+        return self
+
+    def __next__(self) -> xr.DataArray:
+        while True:
+            chunk = next(self._input_it)
+            chunk_start = int(chunk.attrs["time_bias"])
+            chunk_stop = chunk_start + chunk.sizes["time"]
+            if chunk_start >= self._stop:
+                raise StopIteration  # We've gone past `stop`
+            if chunk_stop > self._start:
+                break  # We've found a chunk which is at least partially kept
+
+        if self._start > chunk_start or self._stop < chunk_stop:
+            slice_start = max(0, self._start - chunk_start)
+            slice_stop = min(chunk.sizes["time"], self._stop - chunk_start)
+            chunk = chunk.isel(time=np.s_[slice_start, slice_stop])
+            chunk.attrs["time_bias"] += slice_start
+        return chunk
+
+
+class IFFT:
+    """Iterator adapter than converts frequency domain to time domain."""
+
+    def __init__(self, input_data: Iterable[xr.DataArray]) -> None:
+        self._input_it = iter(input_data)
+
+    def __iter__(self) -> Self:
+        return self
+
+    def __next__(self) -> xr.DataArray:
+        chunk = next(self._input_it)
+        n_channels = chunk.sizes["channel"]
+        # Move middle frequency to position 0
+        chunk = chunk.roll(channel=-(n_channels // 2))
+        # Convert back to time domain with inverse FFT
+        chunk = xrsig.ifft(chunk, dim="channel")
+        # The channel dimension is now flattened into a time dimension. We
+        # have to use a temporary name for it, since xarray doesn't like
+        # using the same name for the new dimension.
+        chunk = chunk.stack(tmp=("time", "channel"), create_index=False)
+        chunk = chunk.rename(tmp="time")
+        chunk.attrs["time_scale"] /= n_channels
+        chunk.attrs["time_bias"] *= n_channels
+        return chunk
 
 
 # TODO: switch to float32
@@ -27,6 +91,28 @@ def _fir_coeff_win(taps: int, passband: float, ratio: Fraction, window: str = "h
     # Normalise for unitary incoherent gain
     fir *= np.sqrt(ratio.numerator / np.sum(np.square(fir)))
     return xr.DataArray(fir, dims=("time",))
+
+
+def _upfirdn(h: xr.DataArray, x: xr.DataArray, ratio: Fraction) -> xr.DataArray:
+    """Apply upfirdn operation and adjust timestamp attributes."""
+    x = xrsig.upfirdn(
+        h,
+        x,
+        up=ratio.numerator,
+        down=ratio.denominator,
+        dim="time",
+    )
+    # Emulate upsampling
+    x.attrs["time_scale"] /= ratio.numerator
+    x.attrs["time_bias"] *= ratio.denominator
+    # Shift to centre the filter (upfirdn is a "full" convolution, hence
+    # the reference point moves backwards in time).
+    x.attrs["time_bias"] -= h.sizes["time"] // 2
+    # Downsample, being careful to ensure that time_bias is
+    # a Fraction.
+    x.attrs["time_scale"] *= ratio.denominator
+    x.attrs["time_bias"] /= Fraction(ratio.denominator)
+    return x
 
 
 # TODO: switch to float32
@@ -55,42 +141,6 @@ def _hilbert_coeff_win(N: int, window: str = "hamming") -> xr.DataArray:
     win_coeff = scipy.signal.get_window(window, N, fftbins=False)
     # Return windowed impulse response
     return xr.DataArray(hd * win_coeff, dims=("time",))
-
-
-class IFFT:
-    """Iterator adapter than converts frequency domain to time domain."""
-
-    def __init__(self, input_data: Iterable[xr.DataArray], first_sample: int = 0) -> None:
-        self.first_sample = first_sample
-        self._input_it = iter(input_data)
-
-    def __iter__(self) -> Self:
-        return self
-
-    def __next__(self) -> xr.DataArray:
-        while True:
-            chunk = next(self._input_it)
-            sample0 = int(chunk.coords["time"][0])  # Force to Python int
-            n_channels = chunk.sizes["channel"]
-            out_samples = chunk.sizes["time"] * n_channels
-            if self.first_sample < sample0 + out_samples:
-                break  # We've reached a valid chunk
-
-        n_channels = chunk.sizes["channel"]
-        # Move middle frequency to position 0
-        chunk = chunk.roll(channel=-(n_channels // 2))
-        # Convert back to time domain with inverse FFT
-        chunk = xrsig.ifft(chunk, dim="channel")
-        # The channel dimension is now flattened into a time dimension. We
-        # have to use a temporary name for it, since xarray doesn't like
-        # using the same name for the new dimension.
-        chunk = chunk.drop_vars("time")
-        chunk = chunk.stack(tmp=("time", "channel"), create_index=False)
-        chunk = chunk.rename(tmp="time")
-        chunk.coords["time"] = pd.RangeIndex(sample0, sample0 + out_samples)
-        if self.first_sample > sample0:
-            chunk = chunk.isel(time=np.s_[self.first_sample :])
-        return chunk
 
 
 def _split_sidebands(data: xr.DataArray, coeff: xr.DataArray) -> xr.DataArray:
@@ -122,7 +172,27 @@ def _split_sidebands(data: xr.DataArray, coeff: xr.DataArray) -> xr.DataArray:
         coords="minimal",
     )
     out.coords["sideband"] = ["lsb", "usb"]
+    out.attrs = data.attrs
+    out.attrs["time_bias"] += trim
     return out
+
+
+def _concat_time(arrays: Sequence[xr.DataArray]) -> xr.DataArray:
+    """Concatenate datasets in time.
+
+    This checks that the arrays are contiguous in time and fixes up the
+    timestamping attributes.
+    """
+    for attr in ["time_base", "time_scale"]:
+        for array in arrays:
+            if array.attrs[attr] != arrays[0].attrs[attr]:
+                raise ValueError(f"Attribute {attr} is inconsistent")
+    n = 0
+    for array in arrays:
+        if array.attrs["time_bias"] != arrays[0].attrs["time_bias"] + n:
+            raise ValueError("Chunks are not contiguous in time")
+        n += array.sizes["time"]
+    return xr.concat(arrays, dim="time")
 
 
 class Resample:
@@ -152,8 +222,7 @@ class Resample:
         if input_params.bandwidth < output_params.bandwidth:
             raise ValueError("Cannot produce more output bandwidth than input")
         self._ratio = Fraction(output_params.bandwidth) / Fraction(input_params.bandwidth)
-        n = self._ratio.numerator
-        d = self._ratio.denominator
+        n, d = self._ratio.as_integer_ratio()
         self._fir = _fir_coeff_win(resample_params.fir_taps, resample_params.passband, self._ratio)
         # upfirdn does a full convolution, so we need to trim the result to get
         # only valid samples (e.g. see np.convolve). If we discard x output
@@ -161,42 +230,42 @@ class Resample:
         # be strictly less than n.
         self._fir_discard_left = (resample_params.fir_taps - 1 - n) // d + 1
         self._hilbert = _hilbert_coeff_win(resample_params.hilbert_taps)
-        mix_freq = input_params.center_freq - output_params.center_freq
-        self._mix_scale = mix_freq / input_params.bandwidth
+        self._mix_freq = input_params.center_freq - output_params.center_freq
         self._input_it = iter(input_data)
 
     def __iter__(self) -> Iterator[xr.DataArray]:
         buffer = None
-        n = self._ratio.numerator
-        d = self._ratio.denominator
+        n, d = self._ratio.as_integer_ratio()
         for input_chunk in self._input_it:
             if buffer is None:
                 buffer = input_chunk
             else:
-                # TODO: check that it follows directly from previous chunk
-                buffer = xr.concat([buffer, input_chunk], dim="time")
+                buffer = _concat_time([buffer, input_chunk])
+            n_time = buffer.sizes["time"]
             # Determine first invalid sample. Output sample x takes taps up to
             # upsampled sample x*d (inclusive). This must be strictly less
-            # than n*buffer_len for the sample to be valid.
-            stop = (n * buffer.sizes["time"] - 1) // d + 1
+            # than n*n_time for the sample to be valid.
+            stop = (n * n_time - 1) // d + 1
             # Hilbert filter further eats into valid samples
             stop -= self._hilbert.sizes["time"] - 1
             # Additionally, we only want to take a number of samples that
             # leaves the phase of upfirdn intact for the next batch.
             stop -= (stop - self._fir_discard_left) % n
             if stop > self._fir_discard_left:
-                mixed = buffer * np.exp(2j * np.pi * self._mix_scale * buffer.coords["time"])
-                convolved = xrsig.upfirdn(
-                    self._fir,
-                    mixed,
-                    up=self._ratio.numerator,
-                    down=self._ratio.denominator,
-                    dim="time",
-                )
+                # Do the multiplication in Fraction to avoid
+                mix_scale = float(Fraction(self._mix_freq) * buffer.attrs["time_scale"])
+                sample_indices = np.arange(n_time) + float(buffer.attrs["time_bias"])
+                # TODO: be more careful about rounding errors in computing mixer
+                mixer = xr.DataArray(np.exp(2j * np.pi * mix_scale * sample_indices), dims=("time",))
+                mixed = buffer * mixer
+                mixed.attrs = buffer.attrs
+                convolved = _upfirdn(self._fir, mixed, self._ratio)
                 convolved = _split_sidebands(convolved, self._hilbert)
                 convolved = convolved.isel(time=np.s_[self._fir_discard_left : stop])
-                # TODO: add time coords to output
+                convolved.attrs["time_bias"] += self._fir_discard_left
                 yield convolved
                 # Number of input samples to advance
+                assert (convolved.sizes["time"] / self._ratio).is_integer()
                 used = int(convolved.sizes["time"] / self._ratio)
                 buffer = buffer.isel(time=np.s_[used:])
+                buffer.attrs["time_bias"] += used
