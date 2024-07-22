@@ -104,7 +104,7 @@ def _upfirdn(h: xr.DataArray, x: xr.DataArray, ratio: Fraction) -> xr.DataArray:
     )
     # Emulate upsampling
     x.attrs["time_scale"] /= ratio.numerator
-    x.attrs["time_bias"] *= ratio.denominator
+    x.attrs["time_bias"] *= ratio.numerator
     # Shift to centre the filter (upfirdn is a "full" convolution, hence
     # the reference point moves backwards in time).
     x.attrs["time_bias"] -= h.sizes["time"] // 2
