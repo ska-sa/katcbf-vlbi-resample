@@ -43,5 +43,5 @@ repos:
     hooks:
       - id: pip-compile
         language_version: python3.12
-        args: ["--output-file=requirements.txt", "--strip-extras", "pyproject.toml"]
+        args: ["--output-file=requirements.txt", "--extra=dev", "--strip-extras", "pyproject.toml"]
         files: '^(pyproject\.toml|requirements\.txt)$'

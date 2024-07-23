@@ -20,6 +20,9 @@ dependencies = [
 ]
 dynamic = ["version"]
 
+[project.optional-dependencies]
+dev = ["pre-commit", "pytest", "build"]
+
 [tool.black]
 line-length = 120
 
@@ -37,5 +40,5 @@ convention = "numpy"
 
 [tool.mypy]
 python_version = "3.12"
-files = "src"
+files = ["src", "test"]
 ignore_missing_imports = true
