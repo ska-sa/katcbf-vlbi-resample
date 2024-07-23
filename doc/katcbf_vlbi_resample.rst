@@ -1,0 +1,21 @@
+katcbf\_vlbi\_resample package
+==============================
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 4
+
+   katcbf_vlbi_resample.hdf5_reader
+   katcbf_vlbi_resample.parameters
+   katcbf_vlbi_resample.resample
+   katcbf_vlbi_resample.xrsig
+
+Module contents
+---------------
+
+.. automodule:: katcbf_vlbi_resample
+   :members:
+   :undoc-members:
+   :show-inheritance:

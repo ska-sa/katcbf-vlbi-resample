@@ -22,6 +22,7 @@ dynamic = ["version"]
 
 [project.optional-dependencies]
 dev = ["pre-commit", "pytest", "build"]
+doc = ["sphinx", "sphinx-rtd-theme"]
 
 [tool.black]
 line-length = 120
@@ -35,6 +36,7 @@ line-length = 120
 [tool.ruff.lint]
 extend-select = ["D", "W"]
 extend-ignore = ["D105", "D107"]  # magic methods
+exclude = ["doc/conf.py"]
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
 
