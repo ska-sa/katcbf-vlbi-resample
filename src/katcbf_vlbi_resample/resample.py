@@ -252,11 +252,14 @@ class Resample:
             # leaves the phase of upfirdn intact for the next batch.
             stop -= (stop - self._fir_discard_left) % n
             if stop > self._fir_discard_left:
-                # Do the multiplication in Fraction to avoid
-                mix_scale = float(Fraction(self._mix_freq) * buffer.attrs["time_scale"])
-                sample_indices = np.arange(n_time) + float(buffer.attrs["time_bias"])
-                # TODO: be more careful about rounding errors in computing mixer
-                mixer = xr.DataArray(np.exp(2j * np.pi * mix_scale * sample_indices), dims=("time",))
+                mix_scale = Fraction(self._mix_freq) * buffer.attrs["time_scale"]
+                # Compute the phase for the first sample using Fraction to avoid
+                # rounding errors creeping in when time_bias is large.
+                start_cycles = mix_scale * buffer.attrs["time_bias"]
+                start_cycles -= round(start_cycles)
+                # Now it's safe to drop to floating point
+                cycles = np.arange(n_time) * float(mix_scale) + float(start_cycles)
+                mixer = xr.DataArray(np.exp(2j * np.pi * cycles), dims=("time",))
                 mixed = buffer * mixer
                 mixed.attrs = buffer.attrs
                 convolved = _upfirdn(self._fir, mixed, self._ratio)

@@ -111,7 +111,7 @@ class TestResample:
         out2 = list(resample2)
         out1c = xr.concat(out1, dim="time")
         out2c = xr.concat(out2, dim="time")
-        xr.testing.assert_equal(out1c, out2c)
+        xr.testing.assert_allclose(out1c, out2c)
 
     def test_group_delay(
         self, input_params: StreamParameters, output_params: StreamParameters, resample_params: ResampleParameters
