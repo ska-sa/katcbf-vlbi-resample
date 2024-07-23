@@ -47,7 +47,7 @@ class ClipTime:
         if self._start > chunk_start or self._stop < chunk_stop:
             slice_start = max(0, self._start - chunk_start)
             slice_stop = min(chunk.sizes["time"], self._stop - chunk_start)
-            chunk = chunk.isel(time=np.s_[slice_start, slice_stop])
+            chunk = chunk.isel(time=np.s_[slice_start:slice_stop])
             chunk.attrs["time_bias"] += slice_start
         return chunk
 
