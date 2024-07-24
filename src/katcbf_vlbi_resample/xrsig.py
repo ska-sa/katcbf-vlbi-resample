@@ -2,7 +2,7 @@
 
 """Wrap various scipy signal processing functions for use with xarray."""
 
-from typing import Hashable
+from collections.abc import Hashable
 
 import scipy.fft
 import scipy.signal

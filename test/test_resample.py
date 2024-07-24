@@ -2,8 +2,8 @@
 
 """Tests for :mod:`katcbf_vlbi_resample.resample."""
 
+from collections.abc import Iterator
 from fractions import Fraction
-from typing import Iterator
 
 import numpy as np
 import pytest

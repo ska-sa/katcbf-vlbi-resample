@@ -2,9 +2,10 @@
 
 """Load data from MeerKAT beamformer HDF5 files."""
 
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import Iterator, Mapping, Self, Sequence, TypeVar
+from typing import Self, TypeVar
 
 import h5py
 import numpy as np

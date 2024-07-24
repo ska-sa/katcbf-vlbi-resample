@@ -2,9 +2,9 @@
 
 """Signal processing algorithms."""
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from fractions import Fraction
-from typing import Iterable, Iterator, Self
+from typing import Self
 
 import numpy as np
 import scipy.signal
