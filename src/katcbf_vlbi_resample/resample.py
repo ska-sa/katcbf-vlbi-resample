@@ -53,7 +53,7 @@ class ClipTime:
 
 
 class IFFT:
-    """Iterator adapter than converts frequency domain to time domain."""
+    """Iterator adapter that converts frequency domain to time domain."""
 
     def __init__(self, input_data: Iterable[xr.DataArray]) -> None:
         self._input_it = iter(input_data)
@@ -202,7 +202,7 @@ class Resample:
     to one that yields output data in chunks. The chunks are not one-to-one
     due to windowing effects.
 
-    Each input axis must have a `time` dimension, and it must have
+    Each input array must have a `time` dimension, and it must have
     a coordinate that contains consecutive integers. Each subsequent
     chunk must also follow on contiguously from the previous one. Chunks need
     not be the same size. Input samples are expected to be complex values,
