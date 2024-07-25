@@ -1,0 +1,47 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-shebang-scripts-are-executable
+      - id: check-executables-have-shebangs
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: no-commit-to-branch # without arguments, master/main will be protected.
+      - id: trailing-whitespace
+  - repo: https://github.com/psf/black
+    rev: 24.4.2
+    hooks:
+      - id: black
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.2
+    hooks:
+      - id: ruff
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.10.1
+    hooks:
+      - id: mypy
+        # Passing filenames to mypy can do odd things.
+        # pyproject.toml determines the set of files that will actually be checked.
+        pass_filenames: false
+        # The pre-commit hook passes some options, but we set options in pyproject.toml.
+        args: []
+        additional_dependencies:
+          - astropy==6.1.1
+          - baseband==4.2.0
+          - h5py==3.11.0
+          - numpy==2.0.0
+          - scipy==1.14.0
+          - xarray==2024.6.0
+  - repo: https://github.com/jazzband/pip-tools
+    rev: 7.4.1
+    hooks:
+      - id: pip-compile
+        language_version: python3.12
+        args: ["--output-file=requirements.txt", "--extra=dev", "--strip-extras", "pyproject.toml"]
+        files: '^(pyproject\.toml|requirements\.txt)$'

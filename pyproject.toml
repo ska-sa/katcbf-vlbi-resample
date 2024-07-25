@@ -1,0 +1,46 @@
+# Copyright (c) 2024, National Research Foundation (SARAO)
+
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+
+[project]
+name = "katcbf_vlbi_resample"
+description = "Proof-of-concept of resampling tied-array-channelised-voltages for VLBI"
+requires-python = ">=3.12"
+dependencies = [
+    "astropy",
+    "baseband",
+    "h5py",
+    "numpy",
+    "scipy",
+    "xarray",
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+dev = ["pre-commit", "pytest", "build"]
+doc = ["sphinx", "sphinx-rtd-theme"]
+
+[tool.black]
+line-length = 120
+
+[tool.isort]
+profile = "black"
+line_length = 120
+
+[tool.ruff]
+line-length = 120
+[tool.ruff.lint]
+extend-select = ["D", "W"]
+extend-ignore = ["D105", "D107"]  # magic methods
+exclude = ["doc/conf.py"]
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src", "test"]
+ignore_missing_imports = true
