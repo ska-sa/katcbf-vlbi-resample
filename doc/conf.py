@@ -25,6 +25,7 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3/", None),
     "astropy": ("https://docs.astropy.org/en/latest", None),
+    "baseband": ("https://baseband.readthedocs.io/en/stable", None),
     "numpy": ("https://numpy.org/doc/stable", None),
     "scipy": ("https://docs.scipy.org/doc/scipy", None),
     "xarray": ("https://docs.xarray.dev/en/stable", None),

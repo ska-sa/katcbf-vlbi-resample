@@ -2,7 +2,7 @@
 
 """Signal processing algorithms."""
 
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator
 from fractions import Fraction
 from typing import Self
 
@@ -12,6 +12,7 @@ import xarray as xr
 
 from . import xrsig
 from .parameters import ResampleParameters, StreamParameters
+from .utils import concat_time
 
 
 class ClipTime:
@@ -177,24 +178,6 @@ def _split_sidebands(data: xr.DataArray, coeff: xr.DataArray) -> xr.DataArray:
     return out
 
 
-def _concat_time(arrays: Sequence[xr.DataArray]) -> xr.DataArray:
-    """Concatenate datasets in time.
-
-    This checks that the arrays are contiguous in time and fixes up the
-    timestamping attributes.
-    """
-    for attr in ["time_base", "time_scale"]:
-        for array in arrays:
-            if array.attrs[attr] != arrays[0].attrs[attr]:
-                raise ValueError(f"Attribute {attr} is inconsistent")
-    n = 0
-    for array in arrays:
-        if array.attrs["time_bias"] != arrays[0].attrs["time_bias"] + n:
-            raise ValueError("Chunks are not contiguous in time")
-        n += array.sizes["time"]
-    return xr.concat(arrays, dim="time")
-
-
 class Resample:
     """Resample to a different frequency and split into sidebands.
 
@@ -240,7 +223,7 @@ class Resample:
             if buffer is None:
                 buffer = input_chunk
             else:
-                buffer = _concat_time([buffer, input_chunk])
+                buffer = concat_time([buffer, input_chunk])
             n_time = buffer.sizes["time"]
             # Determine first invalid sample. Output sample x takes taps up to
             # upsampled sample x*d (inclusive). This must be strictly less
