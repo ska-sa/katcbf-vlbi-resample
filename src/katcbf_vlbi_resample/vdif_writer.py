@@ -42,6 +42,10 @@ class VDIFEncoder:
             edv=0,
         )
         self._threads = threads
+        frame_rate = 1 / (samples_per_frame * input_data.time_scale)
+        if frame_rate.denominator != 1:
+            raise ValueError("samples_per_frame does not yield an integer frame rate")
+        self._frame_rate = int(frame_rate)
 
         self.time_base = input_data.time_base
         self.time_scale = input_data.time_scale
@@ -63,16 +67,12 @@ class VDIFEncoder:
         time_offset_secs = int(time_offset)
         time_offset_frac = float(time_offset - time_offset_secs)
         time = self.time_base + TimeDelta(time_offset_secs, time_offset_frac, scale="tai", format="sec")
-        frame_rate = float(1 / (header.samples_per_frame * self.time_scale))
-        header.set_time(time, frame_rate=frame_rate * u.Hz)
+        header.set_time(time, frame_rate=self._frame_rate * u.Hz)
 
         frames = [self._frame(i, header, frame_data.sel(thread_idx)) for i, thread_idx in enumerate(self._threads)]
         return VDIFFrameSet(frames, header)
 
     def __iter__(self) -> Iterator[VDIFFrameSet]:
-        # TODO: validate that samples_per_frame lines up with time_scale to
-        # give an integer number of frames per second. That might require
-        # the constructor to have knowledge of time_scale.
         samples_per_frame = self._header.samples_per_frame
         buffer = None
         for in_data in self._input_it:
