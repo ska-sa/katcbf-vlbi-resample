@@ -47,6 +47,15 @@ class VDIFEncoder:
             raise ValueError("samples_per_frame does not yield an integer frame rate")
         self._frame_rate = int(frame_rate)
 
+        # The first sample of each frame must satisfy
+        # index % samples_per_frame = phase, where we determine phase here
+        # so that the timestamp error is <=0.5 samples.
+
+        # Get fractions of a second until the next second boundary.
+        frac = -input_data.time_base.utc.unix % 1
+        frac_samples = frac / input_data.time_scale
+        self._phase = round(frac_samples) % samples_per_frame
+
         self.time_base = input_data.time_base
         self.time_scale = input_data.time_scale
         self.channels = None
@@ -80,6 +89,16 @@ class VDIFEncoder:
                 buffer = in_data
             else:
                 buffer = concat_time([buffer, in_data])
+            # Discard leading partial frame. For this we just work in
+            # whole samples, not worrying about fractions of a sample.
+            time_bias = round(buffer.attrs["time_bias"])
+            if time_bias % samples_per_frame != self._phase:
+                trim = (self._phase - time_bias) % samples_per_frame
+                if trim >= buffer.sizes["time"]:
+                    continue  # Don't have enough data to reach the frame boundary
+                buffer = buffer.isel(time=np.s_[trim:])
+                buffer.attrs["time_bias"] += trim
+
             n_frames = buffer.sizes["time"] // samples_per_frame
             for i in range(n_frames):
                 sample_start = i * samples_per_frame
