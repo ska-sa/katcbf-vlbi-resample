@@ -82,14 +82,15 @@ class HDF5Reader:
         start_time: Time | None = None,
         duration: TimeDelta | None = None,
     ) -> None:
-        self.adc_sample_rate = adc_sample_rate
-        self.sync_time = sync_time
         self._inputs = [_HDF5Input.from_file(name, file) for name, file in files.items()]
         if not self._inputs:
             raise ValueError("At least one input must be defined")
 
-        _single_value("channels", [f.channels for f in self._inputs])
         step_ts_adc = _single_value("timestamp step", [f.step_ts_adc for f in self._inputs])
+        self.time_base = sync_time
+        self.time_scale = Fraction(step_ts_adc) / Fraction(adc_sample_rate)
+        self.channels = _single_value("channels", [f.channels for f in self._inputs])
+
         first_ts_adc = max(f.first_ts_adc for f in self._inputs)
         last_ts_adc = min(f.last_ts_adc for f in self._inputs)
         if last_ts_adc <= first_ts_adc:
@@ -116,9 +117,8 @@ class HDF5Reader:
             f.offset = -f.first_ts_adc // step_ts_adc
 
     def __iter__(self) -> Iterator[xr.DataArray]:
-        chunk_spectra = self._inputs[0].file["Data"]["bf_raw"].chunks[1]
+        chunk_spectra = self._inputs[0].bf_raw.chunks[1]
         chunk_adc = self._step_ts_adc * chunk_spectra
-        time_scale = Fraction(self._step_ts_adc) / Fraction(self.adc_sample_rate)
         for ts0 in range(self._start_ts_adc, self._stop_ts_adc, chunk_adc):
             ts1 = min(ts0 + chunk_adc, self._stop_ts_adc)
             spectrum0 = ts0 // self._step_ts_adc
@@ -126,17 +126,13 @@ class HDF5Reader:
             parts = []
             for f in self._inputs:
                 parts.append(f.bf_raw[:, f.offset + spectrum0 : f.offset + spectrum1, :])
-            # Combine, then convert to complex
+            # Combine, then convert to complex. TODO: nan out missing data
             data = np.stack(parts).astype(np.float64).view(np.complex128)[..., 0]
             yield xr.DataArray(
                 data,
                 dims=("pol", "channel", "time"),
                 coords={"pol": [f.name for f in self._inputs]},
-                attrs={
-                    "time_base": self.sync_time,
-                    "time_scale": time_scale,
-                    "time_bias": ts0 // self._step_ts_adc,
-                },
+                attrs={"time_bias": ts0 // self._step_ts_adc},
             )
         for f in self._inputs:
             f.file.close()

@@ -11,6 +11,7 @@ Submodules
    katcbf_vlbi_resample.parameters
    katcbf_vlbi_resample.power
    katcbf_vlbi_resample.resample
+   katcbf_vlbi_resample.stream
    katcbf_vlbi_resample.utils
    katcbf_vlbi_resample.vdif_writer
    katcbf_vlbi_resample.xrsig

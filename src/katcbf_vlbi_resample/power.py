@@ -2,11 +2,12 @@
 
 """Normalise power level prior to quantisation."""
 
-from collections.abc import Iterable
 from typing import Self
 
 import numpy as np
 import xarray as xr
+
+from .stream import Stream
 
 
 class NormalisePower:
@@ -18,9 +19,12 @@ class NormalisePower:
     TODO: this does not yet use a moving window.
     """
 
-    def __init__(self, input_data: Iterable[xr.DataArray], scale: float) -> None:
+    def __init__(self, input_data: Stream[xr.DataArray], scale: float) -> None:
         self._input_it = iter(input_data)
         self.scale = scale
+        self.time_base = input_data.time_base
+        self.time_scale = input_data.time_scale
+        self.channels = input_data.channels
 
     def __iter__(self) -> Self:
         return self

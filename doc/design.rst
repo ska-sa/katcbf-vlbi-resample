@@ -12,6 +12,16 @@ processing pipeline.
 
 .. _Dask: https://docs.dask.org/en/stable/
 
+Some metadata is associated with the sample stream rather than the individual
+samples. Each stream class must implement the :class:`.stream.Stream`
+protocol, which requires the following attributes:
+
+- `time_base` (:class:`astropy.time.Time`)
+- `time_scale` (:class:`fraction.Fraction`)
+- `channels` (:class:`int`, or ``None`` for unchannelised data)
+
+Their meaning is described below.
+
 Chunk format
 ------------
 Each chunk is an :class:`xarray.DataArray` with a set of conventional
@@ -26,11 +36,10 @@ The following dimensions are recognised:
   ``usb``.
 
 To allow for arithmetic on timestamps without rounding errors, a somewhat
-complex scheme is employed. Each chunk has the following attributes:
+complex scheme is employed. In addition to the stream attributes listed
+above, each chunk has the following xarray attribute:
 
-- `time_base` (:class:`astropy.time.Time`)
 - `time_bias` (:class:`fraction.Fraction`)
-- `time_scale` (:class:`fraction.Fraction`)
 
 Consider a data element with index `i` on the `time` axis. Its timestamp is
 
@@ -40,4 +49,5 @@ Consider a data element with index `i` on the `time` axis. Its timestamp is
 
 The value ``time_bias + i`` is called the "sample index".
 For channelised data, the associated timestamp should be the timestamp for the
-first sample.
+first sample, and the length of the `channel` axis must match the stream's
+`channels` attribute.

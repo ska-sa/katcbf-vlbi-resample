@@ -14,13 +14,27 @@ from katcbf_vlbi_resample.parameters import ResampleParameters, StreamParameters
 from katcbf_vlbi_resample.resample import ClipTime, Resample
 
 
-def split_chunk(chunk: xr.DataArray, size: int) -> Iterator[xr.DataArray]:
-    """Split a chunk into smaller chunks, with size `size` on the `time` dimension."""
-    for start in range(0, chunk.sizes["time"], size):
-        stop = min(start + size, chunk.sizes["time"])
-        sub_chunk = chunk.isel(time=np.s_[start:stop])
-        sub_chunk.attrs["time_bias"] += start
-        yield sub_chunk
+class SimpleStream:
+    """Stream that holds its data in memory."""
+
+    def __init__(
+        self, time_base: Time, time_scale: Fraction, data: xr.DataArray, chunk_size: int | None = None
+    ) -> None:
+        self.time_base = time_base
+        self.time_scale = time_scale
+        self.channels = data.sizes.get("channels")
+        if chunk_size is None:
+            self.chunks = [data]
+        else:
+            self.chunks = []
+            for start in range(0, data.sizes["time"], chunk_size):
+                stop = min(start + chunk_size, data.sizes["time"])
+                chunk = data.isel(time=np.s_[start:stop])
+                chunk.attrs["time_bias"] += start
+                self.chunks.append(chunk)
+
+    def __iter__(self) -> Iterator[xr.DataArray]:
+        return iter(self.chunks)
 
 
 class TestClipTime:
@@ -32,11 +46,7 @@ class TestClipTime:
         return xr.DataArray(
             np.arange(1000, 50000, 100),
             dims=("time",),
-            attrs={
-                "time_base": Time("2024-07-20T12:00:00", scale="utc"),
-                "time_scale": Fraction(1, 12345),
-                "time_bias": Fraction(50),
-            },
+            attrs={"time_bias": Fraction(50)},
         )
 
     @pytest.mark.parametrize(
@@ -49,12 +59,16 @@ class TestClipTime:
     )
     def test_overlap(self, data: xr.DataArray, start: int, stop: int, time_bias: int, n: int) -> None:
         """Test where selected range overlaps the data."""
-        chunks = list(ClipTime(split_chunk(data, 10), start, stop))
+        time_base = Time("2024-07-20T12:00:00", scale="utc")
+        time_scale = Fraction(1, 12345)
+        orig = SimpleStream(time_base, time_scale, data, 10)
+        clip = ClipTime(orig, start, stop)
+        assert clip.time_base == orig.time_base
+        assert clip.time_scale == orig.time_scale
+        chunks = list(clip)
         next_time_bias = time_bias
         for chunk in chunks:
             assert chunk.sizes["time"]  # Empty chunks should be skipped
-            assert chunk.attrs["time_base"] == data.attrs["time_base"]
-            assert chunk.attrs["time_scale"] == data.attrs["time_scale"]
             assert chunk.attrs["time_bias"] == next_time_bias
             next_time_bias += chunk.sizes["time"]
         out = xr.concat(chunks, dim="time")
@@ -90,8 +104,23 @@ class TestResample:
             passband=0.95,
         )
 
+    @pytest.fixture
+    def time_base(self) -> Time:
+        """Time base for input stream."""
+        return Time("2024-07-20T12:00:00", scale="utc")
+
+    @pytest.fixture
+    def time_scale(self, input_params: StreamParameters):
+        """Time scale for input stream."""
+        return 1 / Fraction(input_params.bandwidth)
+
     def test_chunk_consistency(
-        self, input_params: StreamParameters, output_params: StreamParameters, resample_params: ResampleParameters
+        self,
+        input_params: StreamParameters,
+        output_params: StreamParameters,
+        resample_params: ResampleParameters,
+        time_base: Time,
+        time_scale: Fraction,
     ) -> None:
         """Verify that results are not affected by chunk boundaries."""
         rng = np.random.default_rng(seed=1)
@@ -99,14 +128,12 @@ class TestResample:
             rng.uniform(-1.0, 1.0, size=(2, 1048576)) + 1j * rng.uniform(-1.0, 1.0, size=(2, 1048576)),
             dims=("pol", "time"),
             coords={"pol": ["h", "v"]},
-            attrs={
-                "time_base": Time("2024-07-20T12:00:00", scale="utc"),
-                "time_scale": 1 / Fraction(input_params.bandwidth),
-                "time_bias": Fraction(12345),
-            },
+            attrs={"time_bias": Fraction(12345)},
         )
-        resample1 = Resample(input_params, output_params, resample_params, [data])
-        resample2 = Resample(input_params, output_params, resample_params, split_chunk(data, 50000))
+        orig1 = SimpleStream(time_base, time_scale, data)
+        orig2 = SimpleStream(time_base, time_scale, data, 50000)
+        resample1 = Resample(input_params, output_params, resample_params, orig1)
+        resample2 = Resample(input_params, output_params, resample_params, orig2)
         out1 = list(resample1)
         out2 = list(resample2)
         out1c = xr.concat(out1, dim="time")
@@ -114,17 +141,18 @@ class TestResample:
         xr.testing.assert_allclose(out1c, out2c)
 
     def test_group_delay(
-        self, input_params: StreamParameters, output_params: StreamParameters, resample_params: ResampleParameters
+        self,
+        input_params: StreamParameters,
+        output_params: StreamParameters,
+        resample_params: ResampleParameters,
+        time_base: Time,
+        time_scale: Fraction,
     ) -> None:
         """Check that timestamp attributes correctly yield zero group delay."""
         freqs = [400e6, 410e6, 445e6, 450e6]
         n = 100000
-        attrs = {
-            "time_base": Time("2024-07-20T12:00:00", scale="utc"),
-            "time_scale": 1 / Fraction(input_params.bandwidth),
-            "time_bias": Fraction(12345),
-        }
-        t = (np.arange(n) + float(attrs["time_bias"])) * float(attrs["time_scale"])
+        attrs = {"time_bias": Fraction(12345)}
+        t = (np.arange(n) + float(attrs["time_bias"])) * float(time_scale)
         tones = np.stack([np.exp(2j * np.pi * (f - input_params.center_freq) * t) for f in freqs])
         data = xr.DataArray(
             tones,
@@ -132,7 +160,8 @@ class TestResample:
             coords={"freq": freqs},
             attrs=attrs,
         )
-        resample = Resample(input_params, output_params, resample_params, [data])
+        orig = SimpleStream(time_base, time_scale, data)
+        resample = Resample(input_params, output_params, resample_params, orig)
         out = list(resample)
         assert len(out) == 1
         for f in freqs:
@@ -143,7 +172,7 @@ class TestResample:
                 res = res.sel(sideband="usb")
             # Regenerate the expected tone at the adjusted sampling rate and using
             # the updated timestamp information
-            t = (np.arange(res.sizes["time"]) + float(res.attrs["time_bias"])) * float(res.attrs["time_scale"])
+            t = (np.arange(res.sizes["time"]) + float(res.attrs["time_bias"])) * float(resample.time_scale)
             tone = np.exp(2j * np.pi * (f - output_params.center_freq) * t)
             # Correlate to get the phase
             phase = np.angle(np.vdot(tone, res.as_numpy()))

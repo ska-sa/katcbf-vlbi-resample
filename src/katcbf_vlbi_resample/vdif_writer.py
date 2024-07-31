@@ -2,7 +2,7 @@
 
 """Encode data to VDIF frames."""
 
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterator
 
 import astropy.units as u
 import numpy as np
@@ -10,6 +10,7 @@ import xarray as xr
 from astropy.time import TimeDelta
 from baseband.vdif import VDIFFrame, VDIFFrameSet, VDIFHeader
 
+from .stream import Stream
 from .utils import concat_time
 
 
@@ -22,13 +23,15 @@ class VDIFEncoder:
 
     def __init__(
         self,
-        input_data: Iterable[xr.DataArray],
+        input_data: Stream[xr.DataArray],
         threads: list[dict[str, Any]],
         *,
         bps: int,
         station: str | int,
         samples_per_frame: int,
     ) -> None:
+        if input_data.channels is not None:
+            raise ValueError("VDIFEncoder currently only supports unchannelised data")
         self._input_it = iter(input_data)
         self._header = VDIFHeader.fromvalues(
             bps=bps,
@@ -40,6 +43,10 @@ class VDIFEncoder:
         )
         self._threads = threads
 
+        self.time_base = input_data.time_base
+        self.time_scale = input_data.time_scale
+        self.channels = None
+
     def _frame(self, thread_id: int, header: VDIFHeader, frame_data: xr.DataArray) -> VDIFFrame:
         assert frame_data.dims == ("time",)
         header = header.copy()
@@ -50,13 +57,13 @@ class VDIFEncoder:
     def _frame_set(self, frame_data: xr.DataArray) -> VDIFFrameSet:
         header = self._header.copy()
 
-        time_offset = frame_data.attrs["time_bias"] * frame_data.attrs["time_scale"]
+        time_offset = frame_data.attrs["time_bias"] * self.time_scale
         # Manually split time_offset (a Fraction) into seconds and fractions
         # of a second, to give a high-accuracy TimeDelta.
         time_offset_secs = int(time_offset)
         time_offset_frac = float(time_offset - time_offset_secs)
-        time = frame_data.attrs["time_base"] + TimeDelta(time_offset_secs, time_offset_frac, scale="tai", format="sec")
-        frame_rate = float(1 / (header.samples_per_frame * frame_data.attrs["time_scale"]))
+        time = self.time_base + TimeDelta(time_offset_secs, time_offset_frac, scale="tai", format="sec")
+        frame_rate = float(1 / (header.samples_per_frame * self.time_scale))
         header.set_time(time, frame_rate=frame_rate * u.Hz)
 
         frames = [self._frame(i, header, frame_data.sel(thread_idx)) for i, thread_idx in enumerate(self._threads)]

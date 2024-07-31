@@ -2,7 +2,7 @@
 
 """Signal processing algorithms."""
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterator
 from fractions import Fraction
 from typing import Self
 
@@ -12,6 +12,7 @@ import xarray as xr
 
 from . import xrsig
 from .parameters import ResampleParameters, StreamParameters
+from .stream import Stream
 from .utils import concat_time
 
 
@@ -27,9 +28,12 @@ class ClipTime:
     clip to a whole sample if `time_bias` is non-integral.
     """
 
-    def __init__(self, input_data: Iterable[xr.DataArray], start: int, stop: int) -> None:
+    def __init__(self, input_data: Stream[xr.DataArray], start: int, stop: int) -> None:
         self._start = start
         self._stop = stop
+        self.time_base = input_data.time_base
+        self.time_scale = input_data.time_scale
+        self.channels = input_data.channels
         self._input_it = iter(input_data)
 
     def __iter__(self) -> Self:
@@ -56,7 +60,13 @@ class ClipTime:
 class IFFT:
     """Iterator adapter that converts frequency domain to time domain."""
 
-    def __init__(self, input_data: Iterable[xr.DataArray]) -> None:
+    def __init__(self, input_data: Stream[xr.DataArray]) -> None:
+        if input_data.channels is None:
+            raise TypeError("A stream with channels is required as input")
+        self.time_base = input_data.time_base
+        self.time_scale = input_data.time_scale / Fraction(input_data.channels)
+        self.channels = None
+        self._in_channels = input_data.channels
         self._input_it = iter(input_data)
 
     def __iter__(self) -> Self:
@@ -64,9 +74,9 @@ class IFFT:
 
     def __next__(self) -> xr.DataArray:
         chunk = next(self._input_it)
-        n_channels = chunk.sizes["channel"]
+        assert chunk.sizes["channel"] == self._in_channels
         # Move middle frequency to position 0
-        chunk = chunk.roll(channel=-(n_channels // 2))
+        chunk = chunk.roll(channel=-(self._in_channels // 2))
         # Convert back to time domain with inverse FFT
         chunk = xrsig.ifft(chunk, dim="channel")
         # The channel dimension is now flattened into a time dimension. We
@@ -74,8 +84,7 @@ class IFFT:
         # using the same name for the new dimension.
         chunk = chunk.stack(tmp=("time", "channel"), create_index=False)
         chunk = chunk.rename(tmp="time")
-        chunk.attrs["time_scale"] /= n_channels
-        chunk.attrs["time_bias"] *= n_channels
+        chunk.attrs["time_bias"] *= self._in_channels
         return chunk
 
 
@@ -104,14 +113,12 @@ def _upfirdn(h: xr.DataArray, x: xr.DataArray, ratio: Fraction) -> xr.DataArray:
         dim="time",
     )
     # Emulate upsampling
-    x.attrs["time_scale"] /= ratio.numerator
     x.attrs["time_bias"] *= ratio.numerator
     # Shift to centre the filter (upfirdn is a "full" convolution, hence
     # the reference point moves backwards in time).
     x.attrs["time_bias"] -= h.sizes["time"] // 2
     # Downsample, being careful to ensure that time_bias is
     # a Fraction.
-    x.attrs["time_scale"] *= ratio.denominator
     x.attrs["time_bias"] /= Fraction(ratio.denominator)
     return x
 
@@ -200,10 +207,13 @@ class Resample:
         input_params: StreamParameters,
         output_params: StreamParameters,
         resample_params: ResampleParameters,
-        input_data: Iterable[xr.DataArray],
+        input_data: Stream[xr.DataArray],
     ) -> None:
         if input_params.bandwidth < output_params.bandwidth:
             raise ValueError("Cannot produce more output bandwidth than input")
+        if Fraction(input_params.bandwidth) * input_data.time_scale != 1:
+            # TODO: just eliminate bandwidth from StreamParameters?
+            raise ValueError("Input bandwidth is not consistent with the input stream")
         self._ratio = Fraction(output_params.bandwidth) / Fraction(input_params.bandwidth)
         n, d = self._ratio.as_integer_ratio()
         self._fir = _fir_coeff_win(resample_params.fir_taps, resample_params.passband, self._ratio)
@@ -215,6 +225,10 @@ class Resample:
         self._hilbert = _hilbert_coeff_win(resample_params.hilbert_taps)
         self._mix_freq = input_params.center_freq - output_params.center_freq
         self._input_it = iter(input_data)
+        self._in_time_scale = input_data.time_scale
+        self.time_base = input_data.time_base
+        self.time_scale = input_data.time_scale / self._ratio
+        self.channels = input_data.channels
 
     def __iter__(self) -> Iterator[xr.DataArray]:
         buffer = None
@@ -235,7 +249,7 @@ class Resample:
             # leaves the phase of upfirdn intact for the next batch.
             stop -= (stop - self._fir_discard_left) % n
             if stop > self._fir_discard_left:
-                mix_scale = Fraction(self._mix_freq) * buffer.attrs["time_scale"]
+                mix_scale = Fraction(self._mix_freq) * self._in_time_scale
                 # Compute the phase for the first sample using Fraction to avoid
                 # rounding errors creeping in when time_bias is large.
                 start_cycles = mix_scale * buffer.attrs["time_bias"]
