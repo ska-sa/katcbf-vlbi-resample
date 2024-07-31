@@ -9,11 +9,20 @@ from typing import Self
 import numpy as np
 import scipy.signal
 import xarray as xr
+from astropy.time import Time, TimeDelta
 
 from . import xrsig
 from .parameters import ResampleParameters, StreamParameters
 from .stream import Stream
 from .utils import concat_time
+
+
+def _time_delta_to_sample(dt: TimeDelta, time_scale: Fraction) -> int:
+    """Convert a time offset to the nearest sample index."""
+    # This implementation preserves the full precision of the TimeDelta
+    # by using Fraction's arbitrary precision.
+    time_scale_days = time_scale / 86400
+    return round((Fraction(dt.jd1) + Fraction(dt.jd2)) / time_scale_days)
 
 
 class ClipTime:
@@ -25,12 +34,24 @@ class ClipTime:
 
     The range to select is based on sample indices, as given by
     the `time_bias` attribute on chunks. Note that it will only
-    clip to a whole sample if `time_bias` is non-integral.
+    clip to a whole sample if `time_bias` is non-integral. Alternatively,
+    one can select by absolute time by passing instances of
+    :class:`astropy.time.Time`.
     """
 
-    def __init__(self, input_data: Stream[xr.DataArray], start: int, stop: int) -> None:
-        self._start = start
-        self._stop = stop
+    def __init__(
+        self, input_data: Stream[xr.DataArray], start: Time | int | None = None, stop: Time | int | None = None
+    ) -> None:
+        if start is None or isinstance(start, int):
+            self._start = start
+        else:
+            self._start = _time_delta_to_sample(start - input_data.time_base, input_data.time_scale)
+
+        if stop is None or isinstance(stop, int):
+            self._stop = stop
+        else:
+            self._stop = _time_delta_to_sample(stop - input_data.time_base, input_data.time_scale)
+
         self.time_base = input_data.time_base
         self.time_scale = input_data.time_scale
         self.channels = input_data.channels
@@ -44,14 +65,16 @@ class ClipTime:
             chunk = next(self._input_it)
             chunk_start = int(chunk.attrs["time_bias"])
             chunk_stop = chunk_start + chunk.sizes["time"]
-            if chunk_start >= self._stop:
+            start = chunk_start if self._start is None else self._start
+            stop = chunk_stop if self._stop is None else self._stop
+            if chunk_start >= stop:
                 raise StopIteration  # We've gone past `stop`
-            if chunk_stop > self._start:
+            if chunk_stop > start:
                 break  # We've found a chunk which is at least partially kept
 
-        if self._start > chunk_start or self._stop < chunk_stop:
-            slice_start = max(0, self._start - chunk_start)
-            slice_stop = min(chunk.sizes["time"], self._stop - chunk_start)
+        if start > chunk_start or stop < chunk_stop:
+            slice_start = max(0, start - chunk_start)
+            slice_stop = min(chunk.sizes["time"], stop - chunk_start)
             chunk = chunk.isel(time=np.s_[slice_start:slice_stop])
             chunk.attrs["time_bias"] += slice_start
         return chunk
