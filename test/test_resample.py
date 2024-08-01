@@ -14,6 +14,18 @@ from katcbf_vlbi_resample.parameters import ResampleParameters, StreamParameters
 from katcbf_vlbi_resample.resample import ClipTime, Resample
 
 
+@pytest.fixture
+def time_base() -> Time:
+    """Time base for input stream."""
+    return Time("2024-07-20T12:00:00", scale="utc")
+
+
+@pytest.fixture
+def time_scale() -> Fraction:
+    """Time scale for input stream."""
+    return Fraction(1, 1234)
+
+
 class SimpleStream:
     """Stream that holds its data in memory."""
 
@@ -41,27 +53,33 @@ class TestClipTime:
     """Test :class:`.ClipTime`."""
 
     @pytest.fixture
-    def data(self) -> xr.DataArray:
+    def orig(self, time_base: Time, time_scale: Fraction) -> SimpleStream:
         """Input data, as a single chunk."""
-        return xr.DataArray(
+        data = xr.DataArray(
             np.arange(1000, 50000, 100),
             dims=("time",),
             attrs={"time_bias": Fraction(50)},
         )
+        return SimpleStream(time_base, time_scale, data, 10)
 
     @pytest.mark.parametrize(
         "start,stop,time_bias,n",
         [
             (0, 10000, 50, 490),  # Start and stop span the whole data range
+            (None, None, 50, 490),  # No start or stop
             (170, 290, 170, 120),  # Start and stop aligned to chunks
             (173, 298, 173, 125),  # Stop and stop not aligned to chunks
         ],
     )
-    def test_overlap(self, data: xr.DataArray, start: int, stop: int, time_bias: int, n: int) -> None:
+    def test_overlap(
+        self,
+        orig: SimpleStream,
+        start: int | None,
+        stop: int | None,
+        time_bias: int,
+        n: int,
+    ) -> None:
         """Test where selected range overlaps the data."""
-        time_base = Time("2024-07-20T12:00:00", scale="utc")
-        time_scale = Fraction(1, 12345)
-        orig = SimpleStream(time_base, time_scale, data, 10)
         clip = ClipTime(orig, start, stop)
         assert clip.time_base == orig.time_base
         assert clip.time_scale == orig.time_scale
@@ -74,6 +92,24 @@ class TestClipTime:
         out = xr.concat(chunks, dim="time")
         assert out.sizes["time"] == n
         np.testing.assert_equal(out.data, np.arange(time_bias, time_bias + n) * 100 - 4000)
+
+    @pytest.mark.parametrize(
+        "start,stop",
+        [(10, 40), (10, 50), (None, 40), (540, 1000), (550, 1000), (540, None)],
+    )
+    def test_no_overlap(self, orig: SimpleStream, start: int | None, stop: int | None) -> None:
+        """Test where selected range does not overlap the data."""
+        clip = ClipTime(orig, start, stop)
+        assert clip.time_base == orig.time_base
+        assert clip.time_scale == orig.time_scale
+        chunks = list(clip)
+        assert not chunks
+
+    def test_absolute_time(self, orig: SimpleStream) -> None:
+        """Test absolute times for start and stop."""
+        clip = ClipTime(orig, Time("2024-07-20T12:00:02", scale="utc"), Time("2024-07-20T12:00:02.5", scale="utc"))
+        assert clip._start == 2468
+        assert clip._stop == 3085
 
 
 class TestResample:
@@ -105,12 +141,7 @@ class TestResample:
         )
 
     @pytest.fixture
-    def time_base(self) -> Time:
-        """Time base for input stream."""
-        return Time("2024-07-20T12:00:00", scale="utc")
-
-    @pytest.fixture
-    def time_scale(self, input_params: StreamParameters):
+    def time_scale(self, input_params: StreamParameters) -> Fraction:
         """Time scale for input stream."""
         return 1 / Fraction(input_params.bandwidth)
 
