@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "katcbf_vlbi_resample"
 description = "Proof-of-concept of resampling tied-array-channelised-voltages for VLBI"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "astropy",
     "baseband",
@@ -43,6 +43,6 @@ exclude = ["doc/conf.py"]
 convention = "numpy"
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.11"
 files = ["src", "test"]
 ignore_missing_imports = true

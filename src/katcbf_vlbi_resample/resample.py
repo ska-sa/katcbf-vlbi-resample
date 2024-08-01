@@ -293,7 +293,7 @@ class Resample:
                 convolved.attrs["time_bias"] += self._fir_discard_left
                 yield convolved
                 # Number of input samples to advance
-                assert (convolved.sizes["time"] / self._ratio).is_integer()
+                assert (convolved.sizes["time"] / self._ratio).denominator == 1
                 used = int(convolved.sizes["time"] / self._ratio)
                 buffer = buffer.isel(time=np.s_[used:])
                 buffer.attrs["time_bias"] += used
