@@ -126,7 +126,7 @@ def _fir_coeff_win(taps: int, passband: float, ratio: Fraction, window: str = "h
     )
     # Normalise for unitary incoherent gain
     fir *= np.sqrt(ratio.numerator / np.sum(np.square(fir)))
-    return xr.DataArray(fir, dims=("time",))
+    return xr.DataArray(fir, dims=("time",)).astype(np.float32)
 
 
 def _upfirdn(h: xr.DataArray, x: xr.DataArray, ratio: Fraction) -> xr.DataArray:
@@ -174,7 +174,7 @@ def _hilbert_coeff_win(N: int, window: str = "hamming") -> xr.DataArray:
     # Compute coefficients for a symmetric window as specified
     win_coeff = scipy.signal.get_window(window, N, fftbins=False)
     # Return windowed impulse response
-    return xr.DataArray(hd * win_coeff, dims=("time",))
+    return xr.DataArray(hd * win_coeff, dims=("time",)).astype(np.float32)
 
 
 def _split_sidebands(data: xr.DataArray, coeff: xr.DataArray) -> xr.DataArray:
@@ -285,13 +285,14 @@ class Resample:
                 # rounding errors creeping in when time_bias is large.
                 start_cycles = mix_scale * buffer.attrs["time_bias"]
                 start_cycles -= round(start_cycles)
-                # Now it's safe to drop to floating point
+                # Now it's safe to drop to floating point (but still double precision)
                 if buffer.cupy.is_cupy:
                     arange = cp.arange
                 else:
                     arange = np.arange
-                cycles = arange(n_time) * float(mix_scale) + float(start_cycles)
-                mixer = xr.DataArray(np.exp(2j * np.pi * cycles), dims=("time",))
+                cycles = arange(n_time, dtype=np.float64) * float(mix_scale) + float(start_cycles)
+                # After taking sin/cos, we can drop down to single precision
+                mixer = xr.DataArray(np.exp(2j * np.pi * cycles), dims=("time",)).astype(np.complex64)
                 mixed = buffer * mixer
                 mixed.attrs = buffer.attrs
                 convolved = _upfirdn(self._fir, mixed, self._ratio)

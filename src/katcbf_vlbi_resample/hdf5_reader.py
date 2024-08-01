@@ -128,7 +128,7 @@ class HDF5Reader:
             for f in self._inputs:
                 parts.append(f.bf_raw[:, f.offset + spectrum0 : f.offset + spectrum1, :])
             # Combine, then convert to complex. TODO: nan out missing data
-            data = np.stack(parts).astype(np.float64).view(np.complex128)[..., 0]
+            data = np.stack(parts).astype(np.float32).view(np.complex64)[..., 0]
             yield xr.DataArray(
                 data,
                 dims=("pol", "channel", "time"),
