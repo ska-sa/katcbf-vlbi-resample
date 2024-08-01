@@ -83,7 +83,7 @@ class TestIFFT:
     """Test :class:`.IFFT`."""
 
     def test(self, time_base: Time, time_scale: Fraction) -> None:
-        """Test :class:`.IFFT`."""
+        """Test normal usage."""
         rng = np.random.default_rng(seed=1)
         channels = 32768
         spectra = 123
@@ -103,6 +103,13 @@ class TestIFFT:
         out = concat_time(list(ifft))
         assert out.attrs["time_bias"] == freq_data_xr.attrs["time_bias"] * channels
         np.testing.assert_allclose(time_data.ravel(), out.to_numpy())
+
+    def test_no_channels(self, time_base: Time, time_scale: Fraction) -> None:
+        """Test error handling when the input stream is not channelised."""
+        data = xr.DataArray(np.zeros(100), dims=("time",), attrs={"time_bias": 0})
+        stream = SimpleStream(time_base, time_scale, data)
+        with pytest.raises(TypeError):
+            IFFT(stream)
 
 
 class TestResample:
@@ -138,6 +145,7 @@ class TestResample:
         """Time scale for input stream."""
         return 1 / Fraction(input_params.bandwidth)
 
+    @pytest.mark.parametrize("chunk_size", [100, 20000])
     def test_chunk_consistency(
         self,
         input_params: StreamParameters,
@@ -145,17 +153,18 @@ class TestResample:
         resample_params: ResampleParameters,
         time_base: Time,
         time_scale: Fraction,
+        chunk_size: int,
     ) -> None:
         """Verify that results are not affected by chunk boundaries."""
         rng = np.random.default_rng(seed=1)
         data = xr.DataArray(
-            complex_random(lambda: rng.uniform(-1.0, 1.0, size=(2, 1048576))),
+            complex_random(lambda: rng.uniform(-1.0, 1.0, size=(2, 54321))),
             dims=("pol", "time"),
             coords={"pol": ["h", "v"]},
             attrs={"time_bias": Fraction(12345)},
         )
         orig1 = SimpleStream(time_base, time_scale, data)
-        orig2 = SimpleStream(time_base, time_scale, data, 50000)
+        orig2 = SimpleStream(time_base, time_scale, data, chunk_size)
         resample1 = Resample(input_params, output_params, resample_params, orig1)
         resample2 = Resample(input_params, output_params, resample_params, orig2)
         out1 = list(resample1)

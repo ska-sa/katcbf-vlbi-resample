@@ -22,4 +22,4 @@ class Stream(Protocol[_T_co]):
     channels: int | None  # None means no channel axis
 
     def __iter__(self) -> Iterator[_T_co]:
-        pass
+        pass  # pragma: nocover
