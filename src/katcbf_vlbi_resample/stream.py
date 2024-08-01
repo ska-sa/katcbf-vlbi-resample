@@ -20,6 +20,7 @@ class Stream(Protocol[_T_co]):
     time_base: Time
     time_scale: Fraction
     channels: int | None  # None means no channel axis
+    is_cupy: bool
 
     def __iter__(self) -> Iterator[_T_co]:
         pass  # pragma: nocover

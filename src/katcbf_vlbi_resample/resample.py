@@ -56,6 +56,7 @@ class ClipTime:
         self.time_base = input_data.time_base
         self.time_scale = input_data.time_scale
         self.channels = input_data.channels
+        self.is_cupy = input_data.is_cupy
         self._input_it = iter(input_data)
 
     def __iter__(self) -> Self:
@@ -90,6 +91,7 @@ class IFFT:
         self.time_base = input_data.time_base
         self.time_scale = input_data.time_scale / Fraction(input_data.channels)
         self.channels = None
+        self.is_cupy = input_data.is_cupy
         self._in_channels = input_data.channels
         self._input_it = iter(input_data)
 
@@ -253,6 +255,11 @@ class Resample:
         self.time_base = input_data.time_base
         self.time_scale = input_data.time_scale / self._ratio
         self.channels = input_data.channels
+        self.is_cupy = input_data.is_cupy
+        if input_data.is_cupy:
+            # Transfer filters to the GPU once
+            self._fir = self._fir.cupy.as_cupy()
+            self._hilbert = self._hilbert.cupy.as_cupy()
 
     def __iter__(self) -> Iterator[xr.DataArray]:
         buffer = None

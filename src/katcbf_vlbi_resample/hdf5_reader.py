@@ -90,6 +90,7 @@ class HDF5Reader:
         self.time_base = sync_time
         self.time_scale = Fraction(step_ts_adc) / Fraction(adc_sample_rate)
         self.channels = _single_value("channels", [f.channels for f in self._inputs])
+        self.is_cupy = False
 
         first_ts_adc = max(f.first_ts_adc for f in self._inputs)
         last_ts_adc = min(f.last_ts_adc for f in self._inputs)

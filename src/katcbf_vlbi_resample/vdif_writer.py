@@ -32,6 +32,8 @@ class VDIFEncoder:
     ) -> None:
         if input_data.channels is not None:
             raise ValueError("VDIFEncoder currently only supports unchannelised data")
+        if input_data.is_cupy:
+            raise ValueError("Input from cupy not supported (use AsNumpy to transfer)")
         self._input_it = iter(input_data)
         self._header = VDIFHeader.fromvalues(
             bps=bps,
@@ -59,6 +61,7 @@ class VDIFEncoder:
         self.time_base = input_data.time_base
         self.time_scale = input_data.time_scale
         self.channels = None
+        self.is_cupy = False
 
     def _frame(self, thread_id: int, header: VDIFHeader, frame_data: xr.DataArray) -> VDIFFrame:
         assert frame_data.dims == ("time",)

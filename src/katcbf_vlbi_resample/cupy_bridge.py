@@ -17,6 +17,7 @@ class AsCupy:
         self.time_base = input_data.time_base
         self.time_scale = input_data.time_scale
         self.channels = input_data.channels
+        self.is_cupy = True
         self._input_it = iter(input_data)
 
     def __iter__(self) -> Self:
@@ -33,6 +34,7 @@ class AsNumpy:
         self.time_base = input_data.time_base
         self.time_scale = input_data.time_scale
         self.channels = input_data.channels
+        self.is_cupy = False
         self._input_it = iter(input_data)
 
     def __iter__(self) -> Self:

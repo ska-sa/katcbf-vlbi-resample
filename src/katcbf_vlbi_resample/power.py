@@ -25,6 +25,7 @@ class NormalisePower:
         self.time_base = input_data.time_base
         self.time_scale = input_data.time_scale
         self.channels = input_data.channels
+        self.is_cupy = input_data.is_cupy
 
     def __iter__(self) -> Self:
         return self

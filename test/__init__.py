@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from fractions import Fraction
 from typing import Callable
 
+import cupy_xarray  # noqa: F401
 import numpy as np
 import xarray as xr
 from astropy.time import Time
@@ -33,6 +34,7 @@ class SimpleStream:
         self.time_base = time_base
         self.time_scale = time_scale
         self.channels = data.sizes.get("channel")
+        self.is_cupy = data.cupy.is_cupy
         if chunk_size is None:
             self.chunks = [data]
         else:
