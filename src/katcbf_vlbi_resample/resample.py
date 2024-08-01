@@ -101,7 +101,7 @@ class IFFT:
         # Move middle frequency to position 0
         chunk = chunk.roll(channel=-(self._in_channels // 2))
         # Convert back to time domain with inverse FFT
-        chunk = xrsig.ifft(chunk, dim="channel")
+        chunk = xrsig.ifft(chunk, dim="channel", norm="ortho")
         # The channel dimension is now flattened into a time dimension. We
         # have to use a temporary name for it, since xarray doesn't like
         # using the same name for the new dimension.
