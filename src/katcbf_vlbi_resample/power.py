@@ -31,6 +31,7 @@ class NormalisePower:
 
     def __next__(self) -> xr.DataArray:
         chunk = next(self._input_it)
+        assert chunk.dtype.kind == "f", "only real floating-point data is supported"
         # mypy doesn't recognise that np.square returns an xarray object in this case.
         rms = np.sqrt(np.square(chunk).mean(dim="time"))  # type: ignore
         chunk *= self.scale / rms
