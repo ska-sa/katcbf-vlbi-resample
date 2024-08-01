@@ -208,5 +208,5 @@ class TestResample:
             t = (np.arange(res.sizes["time"]) + float(res.attrs["time_bias"])) * float(resample.time_scale)
             tone = np.exp(2j * np.pi * (f - output_params.center_freq) * t)
             # Correlate to get the phase
-            phase = np.angle(np.vdot(tone, res.as_numpy()))
+            phase = np.angle(np.vdot(tone, res.to_numpy()))
             assert phase == pytest.approx(0.0, abs=1e-7)
