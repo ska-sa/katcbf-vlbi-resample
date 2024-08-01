@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from fractions import Fraction
 from typing import Self
 
+import cupy as cp
 import numpy as np
 import scipy.signal
 import xarray as xr
@@ -278,7 +279,11 @@ class Resample:
                 start_cycles = mix_scale * buffer.attrs["time_bias"]
                 start_cycles -= round(start_cycles)
                 # Now it's safe to drop to floating point
-                cycles = np.arange(n_time) * float(mix_scale) + float(start_cycles)
+                if buffer.cupy.is_cupy:
+                    arange = cp.arange
+                else:
+                    arange = np.arange
+                cycles = arange(n_time) * float(mix_scale) + float(start_cycles)
                 mixer = xr.DataArray(np.exp(2j * np.pi * cycles), dims=("time",))
                 mixed = buffer * mixer
                 mixed.attrs = buffer.attrs

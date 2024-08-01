@@ -4,9 +4,29 @@
 
 from collections.abc import Hashable
 
+import cupy as cp
+import cupy_xarray  # noqa: F401
+import cupyx.scipy.fft
+import cupyx.scipy.signal
+import numpy as np
 import scipy.fft
 import scipy.signal
 import xarray as xr
+
+
+def _wrap_cupyx_upfirdn(h: cp.ndarray, x: cp.ndarray, *args, **kwargs):
+    # Work around a few bugs:
+    # https://github.com/cupy/cupy/issues/8448
+    # https://github.com/cupy/cupy/issues/8449
+    if kwargs.get("mode") == "constant":
+        del kwargs["mode"]
+
+    if x.ndim == 1:
+        return cupyx.scipy.signal.upfirdn(h, x, *args, **kwargs)
+    elif x.ndim == 2:
+        return cp.stack([cupyx.scipy.signal.upfirdn(h, row, *args, **kwargs) for row in x])
+    else:
+        raise NotImplementedError("upfirdn not implemented for ndim > 2 yet")
 
 
 def upfirdn(
@@ -20,9 +40,10 @@ def upfirdn(
     cval: float = 0.0,
 ) -> xr.DataArray:
     """Wrap :func:`scipy.signal.upfirdn` for :class:`xarray.DataArray`."""
+    is_cupy = x.cupy.is_cupy
     out = xr.apply_ufunc(
-        scipy.signal.upfirdn,
-        h,
+        _wrap_cupyx_upfirdn if is_cupy else scipy.signal.upfirdn,
+        h.cupy.as_cupy() if is_cupy else h,  # TODO: don't copy every time!
         x,
         input_core_dims=[[dim], [dim]],
         output_core_dims=[(dim,)],
@@ -46,16 +67,35 @@ def ifft(
     plan=None,
 ) -> xr.DataArray:
     """Wrap :func:`scipy.fft.ifft` for :class:`xarray.DataArray`."""
+    kwargs = dict(norm=norm, overwrite_x=overwrite_x, workers=workers, plan=plan)
+    if x.cupy.is_cupy:
+        del kwargs["workers"]  # not supported by cupyx.scipy.fft
     return xr.apply_ufunc(
-        scipy.fft.ifft,
+        cupyx.scipy.fft.ifft if x.cupy.is_cupy else scipy.fft.ifft,
         x,
         n,
         input_core_dims=[[dim], [dim]],
         output_core_dims=[(dim,)],
         exclude_dims={dim},
-        kwargs=dict(norm=norm, overwrite_x=overwrite_x, workers=workers, plan=plan),
+        kwargs=kwargs,
         keep_attrs=True,
     )
+
+
+def _wrap_cupyx_convolve1d(in1: cp.ndarray, in2: cp.ndarray, *args, **kwargs) -> cp.ndarray:
+    # cp.broadcast unfortunately doesn't allow the final (time) dimensions to
+    # have different sizes, so we have to do more complicated things to figure
+    # out the broadcast shape.
+    pshape1 = in1.shape[:-1]
+    pshape2 = in2.shape[:-1]
+    if pshape1 != pshape2:
+        bshape = np.broadcast_shapes(pshape1, pshape2)
+        in1 = cp.broadcast_to(in1, bshape + in1.shape[-1:])
+        in2 = cp.broadcast_to(in2, bshape + in2.shape[-1:])
+    if in1.ndim == 1:
+        return cupyx.scipy.signal.convolve(in1, in2, *args, **kwargs)
+    else:
+        return cp.stack([_wrap_cupyx_convolve1d(x, y, *args, **kwargs) for x, y in zip(in1, in2)])
 
 
 def convolve1d(
@@ -70,11 +110,12 @@ def convolve1d(
     It always performs 1D convolution, using the `dim` argument to select
     the axis over which to convolve.
     """
+    is_cupy = in1.cupy.is_cupy or in2.cupy.is_cupy
     return xr.apply_ufunc(
-        scipy.signal.convolve,
-        in1,
-        in2,
-        vectorize=True,
+        _wrap_cupyx_convolve1d if is_cupy else scipy.signal.convolve,
+        in1.cupy.as_cupy() if is_cupy else in1,  # TODO: avoid copying every time!
+        in2.cupy.as_cupy() if is_cupy else in2,
+        vectorize=not is_cupy,  # Doesn't work for cupy
         input_core_dims=[[dim], [dim]],
         output_core_dims=[(dim,)],
         exclude_dims={dim},

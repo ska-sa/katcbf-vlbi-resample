@@ -16,8 +16,16 @@ build==1.2.1
     # via katcbf_vlbi_resample (pyproject.toml)
 cfgv==3.4.0
     # via pre-commit
+cupy==13.2.0
+    # via
+    #   cupy-xarray
+    #   katcbf_vlbi_resample (pyproject.toml)
+cupy-xarray==0.1.4
+    # via katcbf_vlbi_resample (pyproject.toml)
 distlib==0.3.8
     # via virtualenv
+fastrlock==0.8.2
+    # via cupy
 filelock==3.15.4
     # via virtualenv
 h5py==3.11.0
@@ -31,6 +39,7 @@ nodeenv==1.9.1
 numpy==2.0.0
     # via
     #   astropy
+    #   cupy
     #   h5py
     #   katcbf_vlbi_resample (pyproject.toml)
     #   pandas
@@ -74,4 +83,6 @@ tzdata==2024.1
 virtualenv==20.26.3
     # via pre-commit
 xarray==2024.6.0
-    # via katcbf_vlbi_resample (pyproject.toml)
+    # via
+    #   cupy-xarray
+    #   katcbf_vlbi_resample (pyproject.toml)
