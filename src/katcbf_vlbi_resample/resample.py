@@ -15,7 +15,7 @@ from astropy.time import Time, TimeDelta
 from . import xrsig
 from .parameters import ResampleParameters, StreamParameters
 from .stream import Stream
-from .utils import concat_time
+from .utils import as_cupy, concat_time
 
 
 def _time_delta_to_sample(dt: TimeDelta, time_scale: Fraction) -> int:
@@ -256,8 +256,8 @@ class Resample:
         self.is_cupy = input_data.is_cupy
         if input_data.is_cupy:
             # Transfer filters to the GPU once
-            self._fir = self._fir.cupy.as_cupy()
-            self._hilbert = self._hilbert.cupy.as_cupy()
+            self._fir = as_cupy(self._fir)
+            self._hilbert = as_cupy(self._hilbert)
 
     def __iter__(self) -> Iterator[xr.DataArray]:
         buffer = None
@@ -284,13 +284,10 @@ class Resample:
                 start_cycles = mix_scale * buffer.attrs["time_bias"]
                 start_cycles -= round(start_cycles)
                 # Now it's safe to drop to floating point (but still double precision)
-                if buffer.cupy.is_cupy:
-                    arange = cp.arange
-                else:
-                    arange = np.arange
-                cycles = arange(n_time, dtype=np.float64) * float(mix_scale) + float(start_cycles)
+                xp = cp.get_array_module(buffer.data)
+                cycles = xp.arange(n_time, dtype=xp.float64) * float(mix_scale) + float(start_cycles)
                 # After taking sin/cos, we can drop down to single precision
-                mixer = xr.DataArray(np.exp(2j * np.pi * cycles), dims=("time",)).astype(np.complex64)
+                mixer = xr.DataArray(xp.exp(2j * xp.pi * cycles), dims=("time",)).astype(xp.complex64)
                 mixed = buffer * mixer
                 mixed.attrs = buffer.attrs
                 convolved = _upfirdn(self._fir, mixed, self._ratio)

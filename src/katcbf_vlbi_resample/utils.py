@@ -31,3 +31,19 @@ def concat_time(arrays: Sequence[xr.DataArray]) -> xr.DataArray:
         exclude_dims={"time"},
         keep_attrs=True,
     )
+
+
+def is_cupy(array: xr.DataArray) -> bool:
+    """Determine whether `array` contains a cupy array."""
+    return isinstance(array.data, cp.ndarray)
+
+
+def as_cupy(array: xr.DataArray) -> xr.DataArray:
+    """Convert `array` to hold a cupy array if necessary."""
+    return xr.DataArray(
+        cp.asarray(array.data),
+        dims=array.dims,
+        coords=array.coords,
+        name=array.name,
+        attrs=array.attrs,
+    )

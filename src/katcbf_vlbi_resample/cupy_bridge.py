@@ -4,10 +4,10 @@
 
 from typing import Self
 
-import cupy_xarray  # noqa: F401
 import xarray as xr
 
 from .stream import Stream
+from .utils import as_cupy
 
 
 class AsCupy:
@@ -24,7 +24,7 @@ class AsCupy:
         return self
 
     def __next__(self) -> xr.DataArray:
-        return next(self._input_it).cupy.as_cupy()
+        return as_cupy(next(self._input_it))
 
 
 class AsNumpy:

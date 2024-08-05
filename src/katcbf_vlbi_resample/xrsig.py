@@ -5,13 +5,14 @@
 from collections.abc import Hashable
 
 import cupy as cp
-import cupy_xarray  # noqa: F401
 import cupyx.scipy.fft
 import cupyx.scipy.signal
 import numpy as np
 import scipy.fft
 import scipy.signal
 import xarray as xr
+
+from .utils import as_cupy, is_cupy
 
 
 def _wrap_cupyx_upfirdn(h: cp.ndarray, x: cp.ndarray, *args, **kwargs):
@@ -40,10 +41,9 @@ def upfirdn(
     cval: float = 0.0,
 ) -> xr.DataArray:
     """Wrap :func:`scipy.signal.upfirdn` for :class:`xarray.DataArray`."""
-    is_cupy = x.cupy.is_cupy
     out = xr.apply_ufunc(
-        _wrap_cupyx_upfirdn if is_cupy else scipy.signal.upfirdn,
-        h.cupy.as_cupy() if is_cupy else h,  # TODO: don't copy every time!
+        _wrap_cupyx_upfirdn if is_cupy(x) else scipy.signal.upfirdn,
+        h,
         x,
         input_core_dims=[[dim], [dim]],
         output_core_dims=[(dim,)],
@@ -68,10 +68,10 @@ def ifft(
 ) -> xr.DataArray:
     """Wrap :func:`scipy.fft.ifft` for :class:`xarray.DataArray`."""
     kwargs = dict(norm=norm, overwrite_x=overwrite_x, workers=workers, plan=plan)
-    if x.cupy.is_cupy:
+    if is_cupy(x):
         del kwargs["workers"]  # not supported by cupyx.scipy.fft
     return xr.apply_ufunc(
-        cupyx.scipy.fft.ifft if x.cupy.is_cupy else scipy.fft.ifft,
+        cupyx.scipy.fft.ifft if is_cupy(x) else scipy.fft.ifft,
         x,
         n,
         input_core_dims=[[dim], [dim]],
@@ -110,12 +110,12 @@ def convolve1d(
     It always performs 1D convolution, using the `dim` argument to select
     the axis over which to convolve.
     """
-    is_cupy = in1.cupy.is_cupy or in2.cupy.is_cupy
+    use_cupy = is_cupy(in1) or is_cupy(in2)
     return xr.apply_ufunc(
-        _wrap_cupyx_convolve1d if is_cupy else scipy.signal.convolve,
-        in1.cupy.as_cupy() if is_cupy else in1,  # TODO: avoid copying every time!
-        in2.cupy.as_cupy() if is_cupy else in2,
-        vectorize=not is_cupy,  # Doesn't work for cupy
+        _wrap_cupyx_convolve1d if use_cupy else scipy.signal.convolve,
+        as_cupy(in1) if use_cupy else in1,  # TODO: avoid copying every time!
+        as_cupy(in2) if use_cupy else in2,
+        vectorize=not use_cupy,  # Doesn't work for cupy
         input_core_dims=[[dim], [dim]],
         output_core_dims=[(dim,)],
         exclude_dims={dim},

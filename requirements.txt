@@ -17,10 +17,6 @@ build==1.2.1
 cfgv==3.4.0
     # via pre-commit
 cupy==13.2.0
-    # via
-    #   cupy-xarray
-    #   katcbf_vlbi_resample (pyproject.toml)
-cupy-xarray==0.1.4
     # via katcbf_vlbi_resample (pyproject.toml)
 distlib==0.3.8
     # via virtualenv
@@ -83,6 +79,4 @@ tzdata==2024.1
 virtualenv==20.26.3
     # via pre-commit
 xarray==2024.6.0
-    # via
-    #   cupy-xarray
-    #   katcbf_vlbi_resample (pyproject.toml)
+    # via katcbf_vlbi_resample (pyproject.toml)
