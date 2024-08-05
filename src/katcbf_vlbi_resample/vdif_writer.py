@@ -5,13 +5,31 @@
 from typing import Any, Iterator
 
 import astropy.units as u
+import cupy as cp
 import numpy as np
 import xarray as xr
 from astropy.time import TimeDelta
-from baseband.vdif import VDIFFrame, VDIFFrameSet, VDIFHeader
+from baseband.base.encoding import TWO_BIT_1_SIGMA
+from baseband.vdif import VDIFFrame, VDIFFrameSet, VDIFHeader, VDIFPayload
 
 from .stream import Stream
 from .utils import concat_time
+
+
+def _encode_2bit(values):
+    """Encode values using 2 bits per value, packing the result into bytes.
+
+    This is equivalent to :func:`baseband.vdif.encode_2bit`, but supports
+    cupy. Note that values very close to the threshold might round
+    differently.
+    """
+    xp = cp.get_array_module(values)
+    cast_values = xp.empty_like(values, dtype=np.uint8)
+    cast_values[:] = np.clip(values * (1 / TWO_BIT_1_SIGMA) + 2, 0, 3)
+    values = cast_values.reshape(values.shape[:-1] + (-1, 4))
+    values <<= xp.arange(0, 8, 2, dtype=np.uint8)
+    # cupy doesn't currently support np.bitwise_or.reduce
+    return values[..., 0] | values[..., 1] | values[..., 2] | values[..., 3]
 
 
 class VDIFEncoder:
@@ -26,17 +44,16 @@ class VDIFEncoder:
         input_data: Stream[xr.DataArray],
         threads: list[dict[str, Any]],
         *,
-        bps: int,
         station: str | int,
         samples_per_frame: int,
     ) -> None:
         if input_data.channels is not None:
             raise ValueError("VDIFEncoder currently only supports unchannelised data")
-        if input_data.is_cupy:
-            raise ValueError("Input from cupy not supported (use AsNumpy to transfer)")
+        if samples_per_frame % 16 != 0:
+            raise ValueError("samples_per_frame must be a multiple of 16")
         self._input_it = iter(input_data)
         self._header = VDIFHeader.fromvalues(
-            bps=bps,
+            bps=2,
             complex_data=False,
             nchan=1,
             station=station,
@@ -67,8 +84,10 @@ class VDIFEncoder:
         assert frame_data.dims == ("time",)
         header = header.copy()
         header.update(thread_id=thread_id)
-        # The newaxis is to insert the channel dimension (of size 1)
-        return VDIFFrame.fromdata(frame_data.to_numpy()[:, np.newaxis], header)
+        return VDIFFrame(
+            header,
+            VDIFPayload(frame_data.to_numpy().view("<u4"), header),
+        )
 
     def _frame_set(self, frame_data: xr.DataArray) -> VDIFFrameSet:
         header = self._header.copy()
@@ -103,10 +122,22 @@ class VDIFEncoder:
                 buffer.attrs["time_bias"] += trim
 
             n_frames = buffer.sizes["time"] // samples_per_frame
+            encoded = xr.apply_ufunc(
+                _encode_2bit,
+                buffer.isel(time=np.s_[: n_frames * samples_per_frame]),
+                input_core_dims=[["time"]],
+                output_core_dims=[("time",)],
+                exclude_dims={"time"},
+                keep_attrs=True,
+            )
+            # Note: we don't change time_bias for encoded, since it's
+            # convenient to continue using it to hold a sample offset.
             for i in range(n_frames):
                 sample_start = i * samples_per_frame
                 sample_stop = (i + 1) * samples_per_frame
-                frame_data = buffer.isel(time=np.s_[sample_start:sample_stop])
+                byte_start = sample_start // 4
+                byte_stop = sample_stop // 4
+                frame_data = encoded.isel(time=np.s_[byte_start:byte_stop])
                 frame_data.attrs["time_bias"] += sample_start
                 yield self._frame_set(frame_data)
             # Cut off the piece that's been processed
