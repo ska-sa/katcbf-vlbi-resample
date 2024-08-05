@@ -16,7 +16,8 @@ dependencies = [
     "cupy",
     "cupy_xarray",
     "h5py",
-    "numpy",
+    # cupy 13 doesn't fully support numpy 2.0 e.g. https://github.com/cupy/cupy/issues/8393
+    "numpy<2.0",
     "scipy",
     "xarray",
 ]
