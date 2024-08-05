@@ -114,7 +114,6 @@ class IFFT:
         return chunk
 
 
-# TODO: switch to float32
 def _fir_coeff_win(taps: int, passband: float, ratio: Fraction, window: str = "hamming") -> xr.DataArray:
     """Calculate coefficients for upfirdn filter."""
     fir = scipy.signal.firwin(
@@ -149,7 +148,6 @@ def _upfirdn(h: xr.DataArray, x: xr.DataArray, ratio: Fraction) -> xr.DataArray:
     return x
 
 
-# TODO: switch to float32
 def _hilbert_coeff_win(N: int, window: str = "hamming") -> xr.DataArray:
     """Calculate Hilbert filter coefficients using window-based design.
 

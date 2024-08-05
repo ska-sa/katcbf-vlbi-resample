@@ -4,7 +4,6 @@
 
 from fractions import Fraction
 
-import numpy as np
 import xarray as xr
 from astropy.time import Time
 
@@ -17,11 +16,11 @@ from . import SimpleStream
 class TestNormalisePower:
     """Test :class:`.NormalisePower`."""
 
-    def test(self, time_base: Time, time_scale: Fraction) -> None:
+    def test(self, xp, time_base: Time, time_scale: Fraction) -> None:
         """Test :class:`.NormalisePower`."""
-        rng = np.random.default_rng(seed=1)
+        rng = xp.random.default_rng(seed=1)
         data = xr.DataArray(
-            rng.normal(scale=4.5, size=(2, 10000)),
+            rng.standard_normal(size=(2, 10000)) * 4.5,  # cupy doesn't implement Generator.normal
             dims=("pol", "time"),
             attrs={"time_bias": Fraction(123, 456)},
         )
@@ -38,4 +37,4 @@ class TestNormalisePower:
         # zero, but there will be random variation, so we don't expect an
         # exact match.
         std = out.std(dim="time")
-        np.testing.assert_allclose(std.to_numpy(), 1.5, rtol=0.02)
+        xp.testing.assert_allclose(std.data, 1.5, rtol=0.02)
