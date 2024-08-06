@@ -25,9 +25,8 @@ def _encode_2bit(values):
     differently.
     """
     xp = cp.get_array_module(values)
-    cast_values = xp.empty_like(values, dtype=np.uint8)
-    cast_values[:] = np.clip(values * (1 / TWO_BIT_1_SIGMA) + 2, 0, 3)
-    values = cast_values.reshape(values.shape[:-1] + (-1, 4))
+    values = xp.clip(values * (1 / TWO_BIT_1_SIGMA) + 2, 0, 3).astype(np.uint8)
+    values = values.reshape(values.shape[:-1] + (-1, 4))
     values <<= xp.arange(0, 8, 2, dtype=np.uint8)
     # cupy doesn't currently support np.bitwise_or.reduce
     return values[..., 0] | values[..., 1] | values[..., 2] | values[..., 3]
