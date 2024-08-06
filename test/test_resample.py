@@ -20,7 +20,7 @@ class TestClipTime:
 
     @pytest.fixture
     def orig(self, xp, time_base: Time, time_scale: Fraction) -> SimpleStream:
-        """Input data, as a single chunk."""
+        """Input stream."""
         data = xr.DataArray(
             xp.arange(1000, 50000, 100),
             dims=("time",),
@@ -74,9 +74,9 @@ class TestClipTime:
 
     def test_absolute_time(self, orig: SimpleStream) -> None:
         """Test absolute times for start and stop."""
-        clip = ClipTime(orig, Time("2024-07-20T12:00:02", scale="utc"), Time("2024-07-20T12:00:02.5", scale="utc"))
-        assert clip._start == 2468
-        assert clip._stop == 3085
+        clip = ClipTime(orig, Time("2024-07-20T12:00:02.25", scale="utc"), Time("2024-07-20T12:00:02.75", scale="utc"))
+        assert clip._start == 320000
+        assert clip._stop == 400000
 
 
 class TestIFFT:

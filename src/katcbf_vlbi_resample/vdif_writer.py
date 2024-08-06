@@ -58,6 +58,9 @@ class VDIFEncode2Bit:
             raise ValueError("VDIFEncoder2Bit currently only supports unchannelised data")
         if samples_per_frame % self.SAMPLES_PER_WORD != 0:
             raise ValueError(f"samples_per_frame must be a multiple of {self.SAMPLES_PER_WORD}")
+        if (samples_per_frame * input_data.time_scale).numerator != 1:
+            raise ValueError("samples_per_frame does not yield an integer frame rate")
+
         self._input_it = iter(input_data)
 
         # The first sample of each frame must satisfy
