@@ -118,7 +118,7 @@ def _fir_coeff_win(taps: int, passband: float, ratio: Fraction, window: str = "h
     """Calculate coefficients for upfirdn filter."""
     fir = scipy.signal.firwin(
         taps,
-        [1 - passband, passband],
+        [0.5 - 0.5 * passband, 0.5 + 0.5 * passband],
         pass_zero="bandpass",
         window=window,
         fs=2 * ratio.denominator,
