@@ -17,6 +17,12 @@ from .stream import Stream
 from .utils import concat_time
 
 
+@cp.fuse
+def _encode_2bit_prep(values):
+    xp = cp.get_array_module(values)
+    return xp.clip(values * (1 / TWO_BIT_1_SIGMA) + 2, 0, 3).astype(np.uint8)
+
+
 def _encode_2bit(values):
     """Encode values using 2 bits per value, packing the result into bytes.
 
@@ -25,7 +31,7 @@ def _encode_2bit(values):
     differently.
     """
     xp = cp.get_array_module(values)
-    values = xp.clip(values * (1 / TWO_BIT_1_SIGMA) + 2, 0, 3).astype(np.uint8)
+    values = _encode_2bit_prep(values)
     values = values.reshape(values.shape[:-1] + (-1, 4))
     values <<= xp.arange(0, 8, 2, dtype=np.uint8)
     # cupy doesn't currently support np.bitwise_or.reduce
