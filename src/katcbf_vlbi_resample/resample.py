@@ -4,7 +4,6 @@
 
 from collections.abc import Iterator
 from fractions import Fraction
-from typing import Self
 
 import cupy as cp
 import numpy as np
@@ -14,7 +13,7 @@ from astropy.time import Time, TimeDelta
 
 from . import xrsig
 from .parameters import ResampleParameters, StreamParameters
-from .stream import Stream
+from .stream import ChunkwiseStream, Stream
 from .utils import as_cupy, concat_time
 
 
@@ -59,7 +58,7 @@ class ClipTime:
         self.is_cupy = input_data.is_cupy
         self._input_it = iter(input_data)
 
-    def __iter__(self) -> Self:
+    def __iter__(self) -> Iterator[xr.DataArray]:
         return self
 
     def __next__(self) -> xr.DataArray:
@@ -82,24 +81,19 @@ class ClipTime:
         return chunk
 
 
-class IFFT:
+class IFFT(ChunkwiseStream[xr.DataArray, xr.DataArray]):
     """Iterator adapter that converts frequency domain to time domain."""
 
     def __init__(self, input_data: Stream[xr.DataArray]) -> None:
         if input_data.channels is None:
             raise TypeError("A stream with channels is required as input")
-        self.time_base = input_data.time_base
+        super().__init__(input_data)
         self.time_scale = input_data.time_scale / Fraction(input_data.channels)
         self.channels = None
         self.is_cupy = input_data.is_cupy
         self._in_channels = input_data.channels
-        self._input_it = iter(input_data)
 
-    def __iter__(self) -> Self:
-        return self
-
-    def __next__(self) -> xr.DataArray:
-        chunk = next(self._input_it)
+    def _transform(self, chunk: xr.DataArray) -> xr.DataArray:
         assert chunk.sizes["channel"] == self._in_channels
         # Move middle frequency to position 0
         chunk = chunk.roll(channel=-(self._in_channels // 2))

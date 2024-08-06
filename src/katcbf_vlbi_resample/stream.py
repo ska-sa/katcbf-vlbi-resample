@@ -2,13 +2,15 @@
 
 """Abstract definition of a sample stream."""
 
+from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from fractions import Fraction
-from typing import Protocol, TypeVar
+from typing import Generic, Protocol, TypeVar
 
 from astropy.time import Time
 
 _T_co = TypeVar("_T_co", covariant=True)
+_T_contra = TypeVar("_T_contra", contravariant=True)
 
 
 class Stream(Protocol[_T_co]):
@@ -35,3 +37,32 @@ class Stream(Protocol[_T_co]):
 
     def __iter__(self) -> Iterator[_T_co]:
         raise NotImplementedError  # pragma: nocover
+
+
+class ChunkwiseStream(ABC, Generic[_T_co, _T_contra]):
+    """Stream where each input chunk becomes one output chunk.
+
+    The chunks need not have the same shape, but if the time scale changes
+    then the constructor must override :attr:`time_scale`. By default,
+    properties are inherited from the input.
+
+    Subclasses must implement :meth:`_transform`.
+    """
+
+    def __init__(self, input_data: Stream[_T_contra]) -> None:
+        self.time_base = input_data.time_base
+        self.time_scale = input_data.time_scale
+        self.channels = input_data.channels
+        self.is_cupy = input_data.is_cupy
+        self._input_it = iter(input_data)
+
+    @abstractmethod
+    def _transform(self, chunk: _T_contra) -> _T_co:
+        """Compute an output chunk from an input chunk."""
+        raise NotImplementedError  # pragma: nocover
+
+    def __iter__(self) -> Iterator[_T_co]:
+        return self
+
+    def __next__(self) -> _T_co:
+        return self._transform(next(self._input_it))

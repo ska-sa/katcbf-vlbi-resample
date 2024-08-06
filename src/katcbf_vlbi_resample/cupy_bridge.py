@@ -4,31 +4,24 @@
 
 from collections import deque
 from collections.abc import Iterator
-from typing import Self
 
 import cupy as cp
 import cupyx
 import xarray as xr
 
-from .stream import Stream
+from .stream import ChunkwiseStream, Stream
 from .utils import as_cupy
 
 
-class AsCupy:
+class AsCupy(ChunkwiseStream[xr.DataArray, xr.DataArray]):
     """Transfer a stream from numpy to cupy."""
 
     def __init__(self, input_data: Stream[xr.DataArray]) -> None:
-        self.time_base = input_data.time_base
-        self.time_scale = input_data.time_scale
-        self.channels = input_data.channels
+        super().__init__(input_data)
         self.is_cupy = True
-        self._input_it = iter(input_data)
 
-    def __iter__(self) -> Self:
-        return self
-
-    def __next__(self) -> xr.DataArray:
-        return as_cupy(next(self._input_it))
+    def _transform(self, chunk: xr.DataArray) -> xr.DataArray:
+        return as_cupy(chunk)
 
 
 class AsNumpy:
