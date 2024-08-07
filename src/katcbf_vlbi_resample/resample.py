@@ -203,6 +203,16 @@ def _split_sidebands(data: xr.DataArray, coeff: xr.DataArray) -> xr.DataArray:
     return out
 
 
+def _mixer(buffer: xr.DataArray, scale: float, start_cycles: float) -> xr.DataArray:
+    xp = cp.get_array_module(buffer.data)
+    cycles = xp.arange(buffer.sizes["time"], dtype=xp.float64) * scale + start_cycles
+    # Remove integer part before dropping to single precision, to reduce rounding
+    # issues.
+    cycles -= np.rint(cycles)
+    cycles = cycles.astype(np.float32)
+    return xr.DataArray(xp.exp(2j * xp.pi * cycles), dims=("time",))
+
+
 class Resample:
     """Resample to a different frequency and split into sidebands.
 
@@ -277,11 +287,7 @@ class Resample:
                 # rounding errors creeping in when time_bias is large.
                 start_cycles = mix_scale * buffer.attrs["time_bias"]
                 start_cycles -= round(start_cycles)
-                # Now it's safe to drop to floating point (but still double precision)
-                xp = cp.get_array_module(buffer.data)
-                cycles = xp.arange(n_time, dtype=xp.float64) * float(mix_scale) + float(start_cycles)
-                # After taking sin/cos, we can drop down to single precision
-                mixer = xr.DataArray(xp.exp(2j * xp.pi * cycles), dims=("time",)).astype(xp.complex64)
+                mixer = _mixer(buffer, float(mix_scale), float(start_cycles))
                 mixed = buffer * mixer
                 mixed.attrs = buffer.attrs
                 convolved = _upfirdn(self._fir, mixed, self._ratio)
