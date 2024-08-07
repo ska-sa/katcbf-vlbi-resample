@@ -204,13 +204,27 @@ def _split_sidebands(data: xr.DataArray, coeff: xr.DataArray) -> xr.DataArray:
 
 
 def _mixer(buffer: xr.DataArray, scale: float, start_cycles: float) -> xr.DataArray:
-    xp = cp.get_array_module(buffer.data)
-    cycles = xp.arange(buffer.sizes["time"], dtype=xp.float64) * scale + start_cycles
-    # Remove integer part before dropping to single precision, to reduce rounding
-    # issues.
-    cycles -= np.rint(cycles)
-    cycles = cycles.astype(np.float32)
-    return xr.DataArray(xp.exp(2j * xp.pi * cycles), dims=("time",))
+    if isinstance(buffer.data, cp.ndarray):
+        kernel = cp.ElementwiseKernel(
+            "float64 scale, float64 start_cycles",
+            "complex64 out",
+            """
+            double cycles = i * scale + start_cycles;
+            cycles -= rint(cycles);
+            float s, c;
+            sincosf((float) cycles * (2 * (float) M_PI), &s, &c);
+            out = complex<float>(c, s);
+            """,
+            "mixer",
+        )
+        return kernel(scale, start_cycles, size=buffer.sizes["time"])
+    else:
+        cycles = np.arange(buffer.sizes["time"], dtype=np.float64) * scale + start_cycles
+        # Remove integer part before dropping to single precision, to reduce rounding
+        # issues.
+        cycles -= np.rint(cycles)
+        cycles = cycles.astype(np.float32)
+        return xr.DataArray(np.exp(2j * np.pi * cycles), dims=("time",))
 
 
 class Resample:
