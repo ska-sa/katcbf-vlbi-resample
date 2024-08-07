@@ -97,8 +97,9 @@ class IFFT(ChunkwiseStream[xr.DataArray, xr.DataArray]):
         assert chunk.sizes["channel"] == self._in_channels
         # Move middle frequency to position 0
         chunk = chunk.roll(channel=-(self._in_channels // 2))
-        # Convert back to time domain with inverse FFT
-        chunk = xrsig.ifft(chunk, dim="channel", norm="ortho")
+        # Convert back to time domain with inverse FFT. The roll necessarily
+        # makes a copy, so it's safe to overwrite the input.
+        chunk = xrsig.ifft(chunk, dim="channel", norm="ortho", overwrite_x=True)
         # The channel dimension is now flattened into a time dimension. We
         # have to use a temporary name for it, since xarray doesn't like
         # using the same name for the new dimension.
