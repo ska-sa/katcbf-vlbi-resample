@@ -123,6 +123,12 @@ class VDIFFormatter:
 
     The data must have already been quantised to words using
     :class:`VDIFEncode2Bit` or similar.
+
+    Multiple VDIF threads are supported, provided that they are uniform. The
+    `threads` argument must contain one element per desired thread, in the
+    order that the thread IDs are to be assigned. The element is a dictionary
+    that is passed to :meth:`xarray.DataArray.sel` to select the desired
+    subarray from the input chunks.
     """
 
     def __init__(
