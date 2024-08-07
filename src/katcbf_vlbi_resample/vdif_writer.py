@@ -61,8 +61,9 @@ class VDIFEncode2Bit:
     def __init__(self, input_data: Stream[xr.DataArray], samples_per_frame: int) -> None:
         if input_data.channels is not None:
             raise ValueError("VDIFEncoder2Bit currently only supports unchannelised data")
-        if samples_per_frame % self.SAMPLES_PER_WORD != 0:
-            raise ValueError(f"samples_per_frame must be a multiple of {self.SAMPLES_PER_WORD}")
+        # VDIF requires an even number of words per frame
+        if samples_per_frame % (2 * self.SAMPLES_PER_WORD) != 0:
+            raise ValueError(f"samples_per_frame must be a multiple of {2 * self.SAMPLES_PER_WORD}")
         if (samples_per_frame * input_data.time_scale).numerator != 1:
             raise ValueError("samples_per_frame does not yield an integer frame rate")
 
@@ -141,8 +142,8 @@ class VDIFFormatter:
     ) -> None:
         if input_data.channels is not None:
             raise ValueError("VDIFFormatter currently only supports unchannelised data")
-        if samples_per_frame % VDIFEncode2Bit.SAMPLES_PER_WORD != 0:
-            raise ValueError(f"samples_per_frame must be a multiple of {VDIFEncode2Bit.SAMPLES_PER_WORD}")
+        if samples_per_frame % (2 * VDIFEncode2Bit.SAMPLES_PER_WORD) != 0:
+            raise ValueError(f"samples_per_frame must be a multiple of {2 * VDIFEncode2Bit.SAMPLES_PER_WORD}")
         self._input_it = iter(input_data)
         self._header = VDIFHeader.fromvalues(
             bps=2,
