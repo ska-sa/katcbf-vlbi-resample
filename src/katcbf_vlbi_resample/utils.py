@@ -40,10 +40,4 @@ def is_cupy(array: xr.DataArray) -> bool:
 
 def as_cupy(array: xr.DataArray) -> xr.DataArray:
     """Convert `array` to hold a cupy array if necessary."""
-    return xr.DataArray(
-        cp.asarray(array.data),
-        dims=array.dims,
-        coords=array.coords,
-        name=array.name,
-        attrs=array.attrs,
-    )
+    return array.copy(data=cp.asarray(array.data))

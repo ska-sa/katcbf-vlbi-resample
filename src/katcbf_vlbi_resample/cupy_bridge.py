@@ -45,13 +45,7 @@ class AsNumpy:
     def __iter__(self) -> Iterator[xr.DataArray]:
         for buffer in self._input_it:
             out = cupyx.empty_like_pinned(buffer.data)
-            buffer = xr.DataArray(
-                cp.asnumpy(buffer.data, out=out, blocking=False),
-                dims=buffer.dims,
-                coords=buffer.coords,
-                name=buffer.name,
-                attrs=buffer.attrs,
-            )
+            buffer = buffer.copy(data=cp.asnumpy(buffer.data, out=out, blocking=False))
             event = cp.cuda.Event(disable_timing=True)
             event.record()
             self._queue.append((buffer, event))
