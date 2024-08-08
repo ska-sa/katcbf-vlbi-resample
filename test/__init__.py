@@ -10,6 +10,8 @@ import numpy as np
 import xarray as xr
 from astropy.time import Time
 
+from katcbf_vlbi_resample.utils import is_cupy
+
 
 def complex_random(gen_real: Callable[[], np.ndarray], /) -> np.ndarray:
     """Generate complex random numbers from a callback for real random numbers.
@@ -33,6 +35,7 @@ class SimpleStream:
         self.time_base = time_base
         self.time_scale = time_scale
         self.channels = data.sizes.get("channel")
+        self.is_cupy = is_cupy(data)
         if chunk_size is None:
             self.chunks = [data]
         else:

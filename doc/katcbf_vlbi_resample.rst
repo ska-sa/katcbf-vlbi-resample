@@ -7,7 +7,9 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
+   katcbf_vlbi_resample.cupy_bridge
    katcbf_vlbi_resample.hdf5_reader
+   katcbf_vlbi_resample.mk
    katcbf_vlbi_resample.parameters
    katcbf_vlbi_resample.power
    katcbf_vlbi_resample.resample

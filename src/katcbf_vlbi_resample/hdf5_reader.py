@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from fractions import Fraction
 from typing import Self, TypeVar
 
+import cupy as cp
+import cupyx
 import h5py
 import numpy as np
 import xarray as xr
@@ -81,6 +83,7 @@ class HDF5Reader:
         sync_time: Time,
         start_time: Time | None = None,
         duration: TimeDelta | None = None,
+        is_cupy: bool = False,
     ) -> None:
         self._inputs = [_HDF5Input.from_file(name, file) for name, file in files.items()]
         if not self._inputs:
@@ -90,6 +93,7 @@ class HDF5Reader:
         self.time_base = sync_time
         self.time_scale = Fraction(step_ts_adc) / Fraction(adc_sample_rate)
         self.channels = _single_value("channels", [f.channels for f in self._inputs])
+        self.is_cupy = is_cupy
 
         first_ts_adc = max(f.first_ts_adc for f in self._inputs)
         last_ts_adc = min(f.last_ts_adc for f in self._inputs)
@@ -123,13 +127,25 @@ class HDF5Reader:
             ts1 = min(ts0 + chunk_adc, self._stop_ts_adc)
             spectrum0 = ts0 // self._step_ts_adc
             spectrum1 = ts1 // self._step_ts_adc
-            parts = []
-            for f in self._inputs:
-                parts.append(f.bf_raw[:, f.offset + spectrum0 : f.offset + spectrum1, :])
-            # Combine, then convert to complex. TODO: nan out missing data
-            data = np.stack(parts).astype(np.float64).view(np.complex128)[..., 0]
+            if self.is_cupy:
+                empty = cupyx.empty_pinned
+                xp = cp
+            else:
+                empty = np.empty
+                xp = np
+            store = empty(
+                (len(self._inputs), self.channels, spectrum1 - spectrum0, 2),
+                self._inputs[0].bf_raw.dtype,
+            )
+            for i, f in enumerate(self._inputs):
+                f.bf_raw.read_direct(
+                    store,
+                    np.s_[:, f.offset + spectrum0 : f.offset + spectrum1, :],
+                    np.s_[i, :, :, :],
+                )
+            # Convert Gaussian integers to complex. TODO: nan out missing data
             yield xr.DataArray(
-                data,
+                xp.asarray(store).astype(np.float32).view(np.complex64)[..., 0],
                 dims=("pol", "channel", "time"),
                 coords={"pol": [f.name for f in self._inputs]},
                 attrs={"time_bias": ts0 // self._step_ts_adc},

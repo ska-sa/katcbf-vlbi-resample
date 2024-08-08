@@ -4,6 +4,7 @@
 
 from collections.abc import Sequence
 
+import cupy as cp
 import xarray as xr
 
 
@@ -18,4 +19,31 @@ def concat_time(arrays: Sequence[xr.DataArray]) -> xr.DataArray:
         if array.attrs["time_bias"] != arrays[0].attrs["time_bias"] + n:
             raise ValueError("Chunks are not contiguous in time")
         n += array.sizes["time"]
-    return xr.concat(arrays, dim="time")
+    # Simply using xr.concat is slow because it builds an index on the
+    # concatenated axis. This is hacky and will probably lose coordinates
+    # in the general case, but is sufficient for the uses in this library.
+    xp = cp.get_array_module(arrays[0].data)
+    return xr.apply_ufunc(
+        lambda *arrays: xp.concatenate(arrays, axis=-1),
+        *arrays,
+        input_core_dims=[["time"] for _ in arrays],
+        output_core_dims=[("time",)],
+        exclude_dims={"time"},
+        keep_attrs=True,
+    )
+
+
+def is_cupy(array: xr.DataArray) -> bool:
+    """Determine whether `array` contains a cupy array."""
+    return isinstance(array.data, cp.ndarray)
+
+
+def as_cupy(array: xr.DataArray) -> xr.DataArray:
+    """Convert `array` to hold a cupy array if necessary."""
+    return xr.DataArray(
+        cp.asarray(array.data),
+        dims=array.dims,
+        coords=array.coords,
+        name=array.name,
+        attrs=array.attrs,
+    )

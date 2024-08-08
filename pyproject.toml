@@ -9,12 +9,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "katcbf_vlbi_resample"
 description = "Proof-of-concept of resampling tied-array-channelised-voltages for VLBI"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "astropy",
     "baseband",
+    "cupy",
     "h5py",
-    "numpy",
+    # cupy 13 doesn't fully support numpy 2.0 e.g. https://github.com/cupy/cupy/issues/8393
+    "numpy<2.0",
     "scipy",
     "xarray",
 ]
@@ -23,6 +25,9 @@ dynamic = ["version"]
 [project.optional-dependencies]
 dev = ["pre-commit", "pytest", "build"]
 doc = ["sphinx", "sphinx-rtd-theme"]
+
+[project.scripts]
+"mk_vlbi_resample" = "katcbf_vlbi_resample.mk:main"
 
 [tool.black]
 line-length = 120
@@ -41,6 +46,6 @@ exclude = ["doc/conf.py"]
 convention = "numpy"
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.11"
 files = ["src", "test"]
 ignore_missing_imports = true

@@ -17,9 +17,21 @@ class Stream(Protocol[_T_co]):
     See :doc:`design` for details of the fields.
     """
 
-    time_base: Time
-    time_scale: Fraction
-    channels: int | None  # None means no channel axis
+    @property
+    def time_base(self) -> Time:  # noqa: D102
+        raise NotImplementedError  # pragma: nocover
+
+    @property
+    def time_scale(self) -> Fraction:  # noqa: D102
+        raise NotImplementedError  # pragma: nocover
+
+    @property
+    def channels(self) -> int | None:  # noqa: D102
+        raise NotImplementedError  # pragma: nocover
+
+    @property
+    def is_cupy(self) -> bool:  # noqa: D102
+        raise NotImplementedError  # pragma: nocover
 
     def __iter__(self) -> Iterator[_T_co]:
-        pass  # pragma: nocover
+        raise NotImplementedError  # pragma: nocover

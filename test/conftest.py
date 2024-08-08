@@ -4,6 +4,8 @@
 
 from fractions import Fraction
 
+import cupy as cp
+import numpy as np
 import pytest
 from astropy.time import Time
 
@@ -18,3 +20,13 @@ def time_base() -> Time:
 def time_scale() -> Fraction:
     """Time scale for input stream."""
     return Fraction(1, 1234)
+
+
+@pytest.fixture(params=[pytest.param(np, id="numpy"), pytest.param(cp, id="cupy")])
+def xp(request: pytest.FixtureRequest):
+    """Module for numpy-like computations.
+
+    Using this fixture allows tests to be performed for both numpy and cupy
+    backends.
+    """  # noqa: D401
+    return request.param

@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from fractions import Fraction
 from typing import Self
 
+import cupy as cp
 import numpy as np
 import scipy.signal
 import xarray as xr
@@ -14,7 +15,7 @@ from astropy.time import Time, TimeDelta
 from . import xrsig
 from .parameters import ResampleParameters, StreamParameters
 from .stream import Stream
-from .utils import concat_time
+from .utils import as_cupy, concat_time
 
 
 def _time_delta_to_sample(dt: TimeDelta, time_scale: Fraction) -> int:
@@ -55,6 +56,7 @@ class ClipTime:
         self.time_base = input_data.time_base
         self.time_scale = input_data.time_scale
         self.channels = input_data.channels
+        self.is_cupy = input_data.is_cupy
         self._input_it = iter(input_data)
 
     def __iter__(self) -> Self:
@@ -89,6 +91,7 @@ class IFFT:
         self.time_base = input_data.time_base
         self.time_scale = input_data.time_scale / Fraction(input_data.channels)
         self.channels = None
+        self.is_cupy = input_data.is_cupy
         self._in_channels = input_data.channels
         self._input_it = iter(input_data)
 
@@ -111,19 +114,18 @@ class IFFT:
         return chunk
 
 
-# TODO: switch to float32
 def _fir_coeff_win(taps: int, passband: float, ratio: Fraction, window: str = "hamming") -> xr.DataArray:
     """Calculate coefficients for upfirdn filter."""
     fir = scipy.signal.firwin(
         taps,
-        [1 - passband, passband],
+        [0.5 - 0.5 * passband, 0.5 + 0.5 * passband],
         pass_zero="bandpass",
         window=window,
         fs=2 * ratio.denominator,
     )
     # Normalise for unitary incoherent gain
     fir *= np.sqrt(ratio.numerator / np.sum(np.square(fir)))
-    return xr.DataArray(fir, dims=("time",))
+    return xr.DataArray(fir, dims=("time",)).astype(np.float32)
 
 
 def _upfirdn(h: xr.DataArray, x: xr.DataArray, ratio: Fraction) -> xr.DataArray:
@@ -146,7 +148,6 @@ def _upfirdn(h: xr.DataArray, x: xr.DataArray, ratio: Fraction) -> xr.DataArray:
     return x
 
 
-# TODO: switch to float32
 def _hilbert_coeff_win(N: int, window: str = "hamming") -> xr.DataArray:
     """Calculate Hilbert filter coefficients using window-based design.
 
@@ -171,7 +172,7 @@ def _hilbert_coeff_win(N: int, window: str = "hamming") -> xr.DataArray:
     # Compute coefficients for a symmetric window as specified
     win_coeff = scipy.signal.get_window(window, N, fftbins=False)
     # Return windowed impulse response
-    return xr.DataArray(hd * win_coeff, dims=("time",))
+    return xr.DataArray(hd * win_coeff, dims=("time",)).astype(np.float32)
 
 
 def _split_sidebands(data: xr.DataArray, coeff: xr.DataArray) -> xr.DataArray:
@@ -252,6 +253,11 @@ class Resample:
         self.time_base = input_data.time_base
         self.time_scale = input_data.time_scale / self._ratio
         self.channels = input_data.channels
+        self.is_cupy = input_data.is_cupy
+        if input_data.is_cupy:
+            # Transfer filters to the GPU once
+            self._fir = as_cupy(self._fir)
+            self._hilbert = as_cupy(self._hilbert)
 
     def __iter__(self) -> Iterator[xr.DataArray]:
         buffer = None
@@ -277,9 +283,11 @@ class Resample:
                 # rounding errors creeping in when time_bias is large.
                 start_cycles = mix_scale * buffer.attrs["time_bias"]
                 start_cycles -= round(start_cycles)
-                # Now it's safe to drop to floating point
-                cycles = np.arange(n_time) * float(mix_scale) + float(start_cycles)
-                mixer = xr.DataArray(np.exp(2j * np.pi * cycles), dims=("time",))
+                # Now it's safe to drop to floating point (but still double precision)
+                xp = cp.get_array_module(buffer.data)
+                cycles = xp.arange(n_time, dtype=xp.float64) * float(mix_scale) + float(start_cycles)
+                # After taking sin/cos, we can drop down to single precision
+                mixer = xr.DataArray(xp.exp(2j * xp.pi * cycles), dims=("time",)).astype(xp.complex64)
                 mixed = buffer * mixer
                 mixed.attrs = buffer.attrs
                 convolved = _upfirdn(self._fir, mixed, self._ratio)
@@ -288,7 +296,7 @@ class Resample:
                 convolved.attrs["time_bias"] += self._fir_discard_left
                 yield convolved
                 # Number of input samples to advance
-                assert (convolved.sizes["time"] / self._ratio).is_integer()
+                assert (convolved.sizes["time"] / self._ratio).denominator == 1
                 used = int(convolved.sizes["time"] / self._ratio)
                 buffer = buffer.isel(time=np.s_[used:])
                 buffer.attrs["time_bias"] += used
