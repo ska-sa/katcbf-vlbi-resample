@@ -106,8 +106,14 @@ def main() -> None:  # noqa: D103
     resample_params = ResampleParameters(fir_taps=args.fir_taps, hilbert_taps=args.hilbert_taps, passband=args.passband)
 
     is_cupy = not args.cpu
+    # rdcc_nbytes sets the chunk cache size. MK HDF5 files tend to have 32MB chunks
+    # while the default cache size is much smaller than that, so we need to increase
+    # it to actually be able to use the chunk cache.
     it: Stream[xr.DataArray] = hdf5_reader.HDF5Reader(
-        {f"pol{i}": h5py.File(input_file, "r") for i, input_file in enumerate(args.input)},
+        {
+            f"pol{i}": h5py.File(input_file, "r", rdcc_nbytes=128 * 1024 * 1024)
+            for i, input_file in enumerate(args.input)
+        },
         adc_sample_rate=telstate_params.adc_sample_rate,
         sync_time=telstate_params.sync_time,
         start_time=args.start,
