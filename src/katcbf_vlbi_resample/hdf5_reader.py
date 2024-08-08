@@ -144,9 +144,12 @@ class HDF5Reader:
                     np.s_[i, :, :, :],
                 )
             # Convert Gaussian integers to complex. TODO: nan out missing data
+            # Also transpose the time and channel axes. That's not actually
+            # required, but it ends up happening eventually, and it's cheaper
+            # to do it early (before converting int8 -> float32).
             yield xr.DataArray(
-                xp.asarray(store).astype(np.float32).view(np.complex64)[..., 0],
-                dims=("pol", "channel", "time"),
+                xp.require(xp.asarray(store).transpose(0, 2, 1, 3), np.float32, "C").view(np.complex64)[..., 0],
+                dims=("pol", "time", "channel"),
                 coords={"pol": [f.name for f in self._inputs]},
                 attrs={"time_bias": ts0 // self._step_ts_adc},
             )
