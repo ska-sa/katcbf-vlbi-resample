@@ -17,6 +17,12 @@ from .stream import Stream
 from .utils import concat_time
 
 
+@cp.fuse
+def _encode_2bit_prep(values):
+    xp = cp.get_array_module(values)
+    return xp.clip(values * (1 / TWO_BIT_1_SIGMA) + 2, 0, 3).astype(np.uint8)
+
+
 def _encode_2bit(values):
     """Encode values using 2 bits per value, packing the result into bytes.
 
@@ -25,9 +31,8 @@ def _encode_2bit(values):
     differently.
     """
     xp = cp.get_array_module(values)
-    cast_values = xp.empty_like(values, dtype=np.uint8)
-    cast_values[:] = np.clip(values * (1 / TWO_BIT_1_SIGMA) + 2, 0, 3)
-    values = cast_values.reshape(values.shape[:-1] + (-1, 4))
+    values = _encode_2bit_prep(values)
+    values = values.reshape(values.shape[:-1] + (-1, 4))
     values <<= xp.arange(0, 8, 2, dtype=np.uint8)
     # cupy doesn't currently support np.bitwise_or.reduce
     return values[..., 0] | values[..., 1] | values[..., 2] | values[..., 3]
@@ -56,8 +61,12 @@ class VDIFEncode2Bit:
     def __init__(self, input_data: Stream[xr.DataArray], samples_per_frame: int) -> None:
         if input_data.channels is not None:
             raise ValueError("VDIFEncoder2Bit currently only supports unchannelised data")
-        if samples_per_frame % self.SAMPLES_PER_WORD != 0:
-            raise ValueError(f"samples_per_frame must be a multiple of {self.SAMPLES_PER_WORD}")
+        # VDIF requires an even number of words per frame
+        if samples_per_frame % (2 * self.SAMPLES_PER_WORD) != 0:
+            raise ValueError(f"samples_per_frame must be a multiple of {2 * self.SAMPLES_PER_WORD}")
+        if (samples_per_frame * input_data.time_scale).numerator != 1:
+            raise ValueError("samples_per_frame does not yield an integer frame rate")
+
         self._input_it = iter(input_data)
 
         # The first sample of each frame must satisfy
@@ -115,6 +124,12 @@ class VDIFFormatter:
 
     The data must have already been quantised to words using
     :class:`VDIFEncode2Bit` or similar.
+
+    Multiple VDIF threads are supported, provided that they are uniform. The
+    `threads` argument must contain one element per desired thread, in the
+    order that the thread IDs are to be assigned. The element is a dictionary
+    that is passed to :meth:`xarray.DataArray.sel` to select the desired
+    subarray from the input chunks.
     """
 
     def __init__(
@@ -127,8 +142,8 @@ class VDIFFormatter:
     ) -> None:
         if input_data.channels is not None:
             raise ValueError("VDIFFormatter currently only supports unchannelised data")
-        if samples_per_frame % VDIFEncode2Bit.SAMPLES_PER_WORD != 0:
-            raise ValueError(f"samples_per_frame must be a multiple of {VDIFEncode2Bit.SAMPLES_PER_WORD}")
+        if samples_per_frame % (2 * VDIFEncode2Bit.SAMPLES_PER_WORD) != 0:
+            raise ValueError(f"samples_per_frame must be a multiple of {2 * VDIFEncode2Bit.SAMPLES_PER_WORD}")
         self._input_it = iter(input_data)
         self._header = VDIFHeader.fromvalues(
             bps=2,

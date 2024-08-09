@@ -4,7 +4,6 @@
 
 from collections.abc import Iterator
 from fractions import Fraction
-from typing import Self
 
 import cupy as cp
 import numpy as np
@@ -14,7 +13,7 @@ from astropy.time import Time, TimeDelta
 
 from . import xrsig
 from .parameters import ResampleParameters, StreamParameters
-from .stream import Stream
+from .stream import ChunkwiseStream, Stream
 from .utils import as_cupy, concat_time
 
 
@@ -59,7 +58,7 @@ class ClipTime:
         self.is_cupy = input_data.is_cupy
         self._input_it = iter(input_data)
 
-    def __iter__(self) -> Self:
+    def __iter__(self) -> Iterator[xr.DataArray]:
         return self
 
     def __next__(self) -> xr.DataArray:
@@ -82,29 +81,25 @@ class ClipTime:
         return chunk
 
 
-class IFFT:
+class IFFT(ChunkwiseStream[xr.DataArray, xr.DataArray]):
     """Iterator adapter that converts frequency domain to time domain."""
 
     def __init__(self, input_data: Stream[xr.DataArray]) -> None:
         if input_data.channels is None:
             raise TypeError("A stream with channels is required as input")
-        self.time_base = input_data.time_base
+        super().__init__(input_data)
         self.time_scale = input_data.time_scale / Fraction(input_data.channels)
         self.channels = None
         self.is_cupy = input_data.is_cupy
         self._in_channels = input_data.channels
-        self._input_it = iter(input_data)
 
-    def __iter__(self) -> Self:
-        return self
-
-    def __next__(self) -> xr.DataArray:
-        chunk = next(self._input_it)
+    def _transform(self, chunk: xr.DataArray) -> xr.DataArray:
         assert chunk.sizes["channel"] == self._in_channels
         # Move middle frequency to position 0
         chunk = chunk.roll(channel=-(self._in_channels // 2))
-        # Convert back to time domain with inverse FFT
-        chunk = xrsig.ifft(chunk, dim="channel", norm="ortho")
+        # Convert back to time domain with inverse FFT. The roll necessarily
+        # makes a copy, so it's safe to overwrite the input.
+        chunk = xrsig.ifft(chunk, dim="channel", norm="ortho", overwrite_x=True)
         # The channel dimension is now flattened into a time dimension. We
         # have to use a temporary name for it, since xarray doesn't like
         # using the same name for the new dimension.
@@ -209,6 +204,30 @@ def _split_sidebands(data: xr.DataArray, coeff: xr.DataArray) -> xr.DataArray:
     return out
 
 
+def _mixer(buffer: xr.DataArray, scale: float, start_cycles: float) -> xr.DataArray:
+    if isinstance(buffer.data, cp.ndarray):
+        kernel = cp.ElementwiseKernel(
+            "float64 scale, float64 start_cycles",
+            "complex64 out",
+            """
+            double cycles = i * scale + start_cycles;
+            cycles -= rint(cycles);
+            float s, c;
+            sincosf((float) cycles * (2 * (float) M_PI), &s, &c);
+            out = complex<float>(c, s);
+            """,
+            "mixer",
+        )
+        return kernel(scale, start_cycles, size=buffer.sizes["time"])
+    else:
+        cycles = np.arange(buffer.sizes["time"], dtype=np.float64) * scale + start_cycles
+        # Remove integer part before dropping to single precision, to reduce rounding
+        # issues.
+        cycles -= np.rint(cycles)
+        cycles = cycles.astype(np.float32)
+        return xr.DataArray(np.exp(2j * np.pi * cycles), dims=("time",))
+
+
 class Resample:
     """Resample to a different frequency and split into sidebands.
 
@@ -283,11 +302,7 @@ class Resample:
                 # rounding errors creeping in when time_bias is large.
                 start_cycles = mix_scale * buffer.attrs["time_bias"]
                 start_cycles -= round(start_cycles)
-                # Now it's safe to drop to floating point (but still double precision)
-                xp = cp.get_array_module(buffer.data)
-                cycles = xp.arange(n_time, dtype=xp.float64) * float(mix_scale) + float(start_cycles)
-                # After taking sin/cos, we can drop down to single precision
-                mixer = xr.DataArray(xp.exp(2j * xp.pi * cycles), dims=("time",)).astype(xp.complex64)
+                mixer = _mixer(buffer, float(mix_scale), float(start_cycles))
                 mixed = buffer * mixer
                 mixed.attrs = buffer.attrs
                 convolved = _upfirdn(self._fir, mixed, self._ratio)
