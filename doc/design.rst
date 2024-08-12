@@ -18,9 +18,12 @@ protocol, which requires the following attributes:
 
 - `time_base` (:class:`astropy.time.Time`)
 - `time_scale` (:class:`fraction.Fraction`)
-- `channels` (:class:`int`, or ``None`` for unchannelised data)
+- `channels` (:class:`int` | ``None``) — the number
+  of channels in the stream, or ``None`` for unchannelised data
+- `is_cupy` (:class:`bool`) — whether the chunks emitted from the stream
+  contain cupy arrays
 
-Their meaning is described below.
+The meaning of `time_base` and `time_scale` is described below.
 
 Chunk format
 ------------
@@ -51,3 +54,30 @@ The value ``time_bias + i`` is called the "sample index".
 For channelised data, the associated timestamp should be the timestamp for the
 first sample, and the length of the `channel` axis must match the stream's
 `channels` attribute.
+
+GPU acceleration
+----------------
+The GPU acceleration uses `cupy`_ to replace operations that would otherwise
+have been done with numpy or scipy. To facilitate testing and the
+:option:`!--cpu` command-line option, most stream classes support either cupy
+or numpy arrays. In some cases the naïve approach of using the same code for
+both backends was found to be slow, and cupy-specific codepaths (using custom
+kernels) was used instead for better performance.
+
+This approach is still sub-optimal, with many unnecessary copies and more
+passes over the memory than necessary. However, it has the benefit of being
+flexible, as the various stream classes can be stacked together in a variety
+of ways.
+
+One important optimisation is overlapping of CPU and GPU work. This is
+achieved in the :class:`.AsNumpy` class, which transfers results from the GPU
+to the CPU. It uses a non-blocking copy so that the CPU can proceed while the
+GPU computes the results that have been requested, and keeps a queue of
+transfers that are in flight.
+
+It should be noted that transfer to and from the GPU are still serialised with
+respect to the GPU computations, as there is only a single CUDA stream. These
+transfers take very little time compared to the computations, so this would
+have only a small benefit.
+
+.. _cupy: https://docs.cupy.dev/
