@@ -10,8 +10,9 @@ Welcome to katcbf-vlbi-resample's documentation!
    :maxdepth: 2
    :caption: Contents:
 
+   introduction
    design
-   modules
+   API reference <katcbf_vlbi_resample>
 
 Indices and tables
 ==================
