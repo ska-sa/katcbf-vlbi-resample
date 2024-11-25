@@ -5,7 +5,17 @@
 import pytest
 import xarray as xr
 
-from katcbf_vlbi_resample.utils import concat_time, isel_time
+from katcbf_vlbi_resample.utils import concat_time, isel_time, time_align
+
+
+@pytest.fixture
+def array(xp) -> xr.DataArray:
+    """Build an array to use as a fixture."""
+    return xr.DataArray(
+        xp.array([3, 1, 4, 1, 5, 9, 2, 6, 5]),
+        dims=("time",),
+        attrs={"time_bias": 100},
+    )
 
 
 class TestConcatTime:
@@ -59,15 +69,6 @@ class TestConcatTime:
 class TestIselTime:
     """Tests for :func:`katcbf_vlbi_resample.utils.isel_time`."""
 
-    @pytest.fixture
-    def array(self, xp) -> xr.DataArray:
-        """Build an array to use as a fixture."""
-        return xr.DataArray(
-            xp.array([3, 1, 4, 1, 5, 9, 2, 6, 5]),
-            dims=("time",),
-            attrs={"time_bias": 100},
-        )
-
     def test_basic(self, xp, array: xr.DataArray) -> None:
         """Test simplest case."""
         out = isel_time(array, xp.s_[3:6])
@@ -102,3 +103,22 @@ class TestIselTime:
         """Test that a non-unity step raises an exception."""
         with pytest.raises(ValueError):
             isel_time(array, xp.s_[3:6:2])
+
+
+class TestTimeAlign:
+    """Tests for :func:`katcbf_vlbi_resample.utils.time_align`."""
+
+    def test_trim(self, xp, array: xr.DataArray) -> None:
+        """Test the case where some data is trimmed."""
+        out = time_align(array, 10, 2)
+        assert out is not None
+        xp.testing.assert_array_equal(out.data, [4, 1, 5, 9, 2, 6, 5])
+        assert out.attrs["time_bias"] == 102
+
+    def test_no_trim(self, array: xr.DataArray) -> None:
+        """Test that case where no trimming is needed."""
+        assert time_align(array, 10) is array
+
+    def test_none(self, array: xr.DataArray) -> None:
+        """Test that case that the array doesn't contain a boundary."""
+        assert time_align(array, 10, 9) is None

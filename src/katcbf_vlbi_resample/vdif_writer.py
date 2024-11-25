@@ -13,7 +13,7 @@ from baseband.base.encoding import TWO_BIT_1_SIGMA
 from baseband.vdif import VDIFFrame, VDIFFrameSet, VDIFHeader, VDIFPayload
 
 from .stream import Stream
-from .utils import concat_time, isel_time
+from .utils import concat_time, isel_time, time_align
 
 
 @cp.fuse
@@ -88,17 +88,12 @@ class VDIFEncode2Bit:
         buffer = None
         for in_data in self._input_it:
             if buffer is None:
-                buffer = in_data
+                # Discard leading partial frame.
+                buffer = time_align(in_data, samples_per_frame, self._phase)
+                if buffer is None:
+                    continue  # Don't have enough data to reach the frame boundary
             else:
                 buffer = concat_time([buffer, in_data])
-            # Discard leading partial frame.
-            time_bias: int = buffer.attrs["time_bias"]
-            if time_bias % samples_per_frame != self._phase:
-                trim = (self._phase - time_bias) % samples_per_frame
-                if trim >= buffer.sizes["time"]:
-                    continue  # Don't have enough data to reach the frame boundary
-                buffer = buffer.isel(time=np.s_[trim:])
-                buffer.attrs["time_bias"] += trim
 
             n_frames = buffer.sizes["time"] // samples_per_frame
             encoded = xr.apply_ufunc(

@@ -14,7 +14,7 @@ from astropy.time import Time, TimeDelta
 from . import xrsig
 from .parameters import ResampleParameters, StreamParameters
 from .stream import ChunkwiseStream, Stream
-from .utils import as_cupy, concat_time, isel_time
+from .utils import as_cupy, concat_time, isel_time, time_align
 
 
 def _time_delta_to_sample(dt: TimeDelta, time_scale: Fraction) -> int:
@@ -283,13 +283,11 @@ class Resample:
         n, d = self._ratio.as_integer_ratio()
         for input_chunk in self._input_it:
             if buffer is None:
-                # Trim to align time_bias suitably. TODO: could instead
-                # pad on the left, then discard invalid samples, which would
-                # avoid losing good data.
-                trim: int = (self._time_bias_mod - input_chunk.attrs["time_bias"]) % d
-                if trim >= input_chunk.sizes["time"]:
-                    continue  # We'd trim away the entire chunk
-                buffer = isel_time(input_chunk, np.s_[trim:])
+                # TODO: could instead pad on the left, then discard invalid
+                # samples, which would avoid discarding good data.
+                buffer = time_align(input_chunk, d, self._time_bias_mod)
+                if buffer is None:
+                    continue  # We've trimmed the entire input chunk
             else:
                 buffer = concat_time([buffer, input_chunk])
             n_time = buffer.sizes["time"]
