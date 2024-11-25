@@ -2,7 +2,7 @@
 
 """Utilities for unit tests."""
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from fractions import Fraction
 from typing import Callable
 
@@ -26,11 +26,12 @@ class SimpleStream:
     """Stream that holds its data in memory.
 
     If `chunk_size` is given, the given data will be split into chunks of this
-    size (on the time dimension).
+    size (on the time dimension). If it is a sequence, it specifies the chunk
+    sizes to use (which must sum to ``data.sizes("time")``).
     """
 
     def __init__(
-        self, time_base: Time, time_scale: Fraction, data: xr.DataArray, chunk_size: int | None = None
+        self, time_base: Time, time_scale: Fraction, data: xr.DataArray, chunk_size: int | Iterable[int] | None = None
     ) -> None:
         self.time_base = time_base
         self.time_scale = time_scale
@@ -38,12 +39,19 @@ class SimpleStream:
         self.is_cupy = is_cupy(data)
         if chunk_size is None:
             self.chunks = [data]
-        else:
+        elif isinstance(chunk_size, int):
             self.chunks = []
             for start in range(0, data.sizes["time"], chunk_size):
                 stop = min(start + chunk_size, data.sizes["time"])
                 chunk = isel_time(data, np.s_[start:stop])
                 self.chunks.append(chunk)
+        else:
+            self.chunks = []
+            for size in chunk_size:
+                assert size <= data.sizes["time"]
+                self.chunks.append(isel_time(data, np.s_[:size]))
+                data = isel_time(data, np.s_[size:])
+            assert data.sizes["time"] == 0, "chunk_size does not sum to the data size"
 
     def __iter__(self) -> Iterator[xr.DataArray]:
         return iter(self.chunks)
