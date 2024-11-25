@@ -2,7 +2,6 @@
 
 """Encode data to VDIF frames."""
 
-from fractions import Fraction
 from typing import Any, Final, Iterator
 
 import astropy.units as u
@@ -92,9 +91,8 @@ class VDIFEncode2Bit:
                 buffer = in_data
             else:
                 buffer = concat_time([buffer, in_data])
-            # Discard leading partial frame. For this we just work in
-            # whole samples, not worrying about fractions of a sample.
-            time_bias = round(buffer.attrs["time_bias"])
+            # Discard leading partial frame.
+            time_bias: int = buffer.attrs["time_bias"]
             if time_bias % samples_per_frame != self._phase:
                 trim = (self._phase - time_bias) % samples_per_frame
                 if trim >= buffer.sizes["time"]:
@@ -111,7 +109,8 @@ class VDIFEncode2Bit:
                 exclude_dims={"time"},
                 keep_attrs=True,
             )
-            encoded.attrs["time_bias"] /= Fraction(self.SAMPLES_PER_WORD)
+            assert encoded.attrs["time_bias"] % self.SAMPLES_PER_WORD == 0
+            encoded.attrs["time_bias"] //= self.SAMPLES_PER_WORD
             yield encoded
             # Cut off the piece that's been processed
             skip = n_frames * samples_per_frame

@@ -2,8 +2,6 @@
 
 """Tests for :mod:`katcbf_vlbi_resample.utils."""
 
-from fractions import Fraction
-
 import pytest
 import xarray as xr
 
@@ -20,7 +18,7 @@ class TestConcatTime:
             xp.arange(10, 20, dtype=xp.uint8).reshape(2, 5),
             dims=("pol", "time"),
             coords={"pol": ["h", "v"]},
-            attrs={"time_bias": Fraction(100, 3)},
+            attrs={"time_bias": 33},
         )
 
     @pytest.fixture
@@ -30,13 +28,13 @@ class TestConcatTime:
             xp.ones((3, 2), dtype=xp.uint8),
             dims=("time", "pol"),
             coords={"pol": ["h", "v"]},
-            attrs={"time_bias": Fraction(115, 3)},
+            attrs={"time_bias": 38},
         )
 
     def test_success(self, xp, array1: xr.DataArray, array2: xr.DataArray) -> None:
         """Test the normal usage path."""
         out = concat_time([array1, array2])
-        assert out.attrs["time_bias"] == Fraction(100, 3)
+        assert out.attrs["time_bias"] == 33
         assert out.dims == ("pol", "time")
         assert out.shape == (2, 8)
         xp.testing.assert_array_equal(

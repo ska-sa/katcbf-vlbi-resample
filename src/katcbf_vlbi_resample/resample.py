@@ -33,8 +33,7 @@ class ClipTime:
     to sample accuracy after the upstream clips to chunk accuracy.
 
     The range to select is based on sample indices, as given by
-    the `time_bias` attribute on chunks. Note that it will only
-    clip to a whole sample if `time_bias` is non-integral. Alternatively,
+    the `time_bias` attribute on chunks. Alternatively,
     one can select by absolute time by passing instances of
     :class:`astropy.time.Time`.
     """
@@ -64,7 +63,7 @@ class ClipTime:
     def __next__(self) -> xr.DataArray:
         while True:
             chunk = next(self._input_it)
-            chunk_start = int(chunk.attrs["time_bias"])
+            chunk_start: int = chunk.attrs["time_bias"]
             chunk_stop = chunk_start + chunk.sizes["time"]
             start = chunk_start if self._start is None else self._start
             stop = chunk_stop if self._stop is None else self._stop
@@ -137,9 +136,9 @@ def _upfirdn(h: xr.DataArray, x: xr.DataArray, ratio: Fraction) -> xr.DataArray:
     # Shift to centre the filter (upfirdn is a "full" convolution, hence
     # the reference point moves backwards in time).
     x.attrs["time_bias"] -= h.sizes["time"] // 2
-    # Downsample, being careful to ensure that time_bias is
-    # a Fraction.
-    x.attrs["time_bias"] /= Fraction(ratio.denominator)
+    # Downsample
+    assert x.attrs["time_bias"] % ratio.denominator == 0
+    x.attrs["time_bias"] //= ratio.denominator
     return x
 
 
@@ -289,14 +288,13 @@ class Resample:
                 # Trim to align time_bias suitably. TODO: could instead
                 # pad on the left, then discard invalid samples, which would
                 # avoid losing good data.
-                trim = (self._time_bias_mod - int(input_chunk.attrs["time_bias"])) % d
+                trim: int = (self._time_bias_mod - input_chunk.attrs["time_bias"]) % d
                 if trim >= input_chunk.sizes["time"]:
                     continue  # We'd trim away the entire chunk
                 buffer = input_chunk.isel(time=np.s_[trim:])
                 buffer.attrs["time_bias"] += trim
             else:
                 buffer = concat_time([buffer, input_chunk])
-            assert int(buffer.attrs["time_bias"]) % d == self._time_bias_mod
             n_time = buffer.sizes["time"]
             # Determine first invalid sample. Output sample x takes taps up to
             # upsampled sample x*d (inclusive). This must be strictly less

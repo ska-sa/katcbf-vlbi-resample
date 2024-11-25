@@ -27,7 +27,7 @@ def input_data(xp) -> xr.DataArray:
     return xr.DataArray(
         xp.tile(xp.arange(-2.5, 3, dtype=xp.float32), 100),
         dims=("time",),
-        attrs={"time_bias": Fraction(297)},
+        attrs={"time_bias": 297},
     )
 
 
@@ -77,7 +77,7 @@ class TestVDIFEncode2Bit:
         # when time_bias is a multiple of the frame size.
         chunks = list(enc)
         out_data = concat_time(chunks)
-        assert out_data.attrs["time_bias"] == Fraction(320, vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD)
+        assert out_data.attrs["time_bias"] == 320 // vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
         assert out_data.sizes["time"] == 480 // vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
         used_input_data = input_data.isel(time=xp.s_[23:503])
         xp.testing.assert_array_equal(out_data.data, vdif_writer._encode_2bit_words(used_input_data.data))
@@ -91,7 +91,7 @@ class TestVDIFFormatter:
         stream = SimpleStream(
             time_base,
             time_scale,
-            xr.DataArray(np.zeros((16, 16)), dims=("channel", "time"), attrs={"time_bias": Fraction(0)}),
+            xr.DataArray(np.zeros((16, 16)), dims=("channel", "time"), attrs={"time_bias": 0}),
         )
         with pytest.raises(ValueError, match="unchannelised"):
             vdif_writer.VDIFFormatter(stream, [{}], station="me", samples_per_frame=80)
@@ -124,7 +124,7 @@ class TestVDIFFormatter:
             ),
             dims=("pol", "time"),
             coords={"pol": ["v", "h"]},
-            attrs={"time_bias": Fraction(320)},
+            attrs={"time_bias": 320},
         )
         samples_per_frame = 160
         orig = SimpleStream(time_base, time_scale, data, 100)

@@ -42,7 +42,7 @@ To allow for arithmetic on timestamps without rounding errors, a somewhat
 complex scheme is employed. In addition to the stream attributes listed
 above, each chunk has the following xarray attribute:
 
-- `time_bias` (:class:`fraction.Fraction`)
+- `time_bias` (:class:`int`)
 
 Consider a data element with index `i` on the `time` axis. Its timestamp is
 
