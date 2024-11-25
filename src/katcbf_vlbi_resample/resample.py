@@ -14,7 +14,7 @@ from astropy.time import Time, TimeDelta
 from . import xrsig
 from .parameters import ResampleParameters, StreamParameters
 from .stream import ChunkwiseStream, Stream
-from .utils import as_cupy, concat_time
+from .utils import as_cupy, concat_time, isel_time
 
 
 def _time_delta_to_sample(dt: TimeDelta, time_scale: Fraction) -> int:
@@ -75,8 +75,7 @@ class ClipTime:
         if start > chunk_start or stop < chunk_stop:
             slice_start = max(0, start - chunk_start)
             slice_stop = min(chunk.sizes["time"], stop - chunk_start)
-            chunk = chunk.isel(time=np.s_[slice_start:slice_stop])
-            chunk.attrs["time_bias"] += slice_start
+            chunk = isel_time(chunk, np.s_[slice_start:slice_stop])
         return chunk
 
 
@@ -189,7 +188,7 @@ def _split_sidebands(data: xr.DataArray, coeff: xr.DataArray) -> xr.DataArray:
     h = xrsig.convolve1d(data.imag, coeff, dim="time", mode="valid")
     # Trim the edges of 'data' to make it match up with h
     trim = coeff.sizes["time"] // 2
-    data = data.isel(time=np.s_[trim:-trim])
+    data = isel_time(data, np.s_[trim:-trim])
     lsb = data.real + h
     usb = data.real - h
     out = xr.concat(
@@ -199,7 +198,6 @@ def _split_sidebands(data: xr.DataArray, coeff: xr.DataArray) -> xr.DataArray:
     )
     out.coords["sideband"] = ["lsb", "usb"]
     out.attrs = data.attrs
-    out.attrs["time_bias"] += trim
     return out
 
 
@@ -291,8 +289,7 @@ class Resample:
                 trim: int = (self._time_bias_mod - input_chunk.attrs["time_bias"]) % d
                 if trim >= input_chunk.sizes["time"]:
                     continue  # We'd trim away the entire chunk
-                buffer = input_chunk.isel(time=np.s_[trim:])
-                buffer.attrs["time_bias"] += trim
+                buffer = isel_time(input_chunk, np.s_[trim:])
             else:
                 buffer = concat_time([buffer, input_chunk])
             n_time = buffer.sizes["time"]
@@ -316,11 +313,9 @@ class Resample:
                 mixed.attrs = buffer.attrs
                 convolved = _upfirdn(self._fir, mixed, self._ratio)
                 convolved = _split_sidebands(convolved, self._hilbert)
-                convolved = convolved.isel(time=np.s_[self._fir_discard_left : stop])
-                convolved.attrs["time_bias"] += self._fir_discard_left
+                convolved = isel_time(convolved, np.s_[self._fir_discard_left : stop])
                 yield convolved
                 # Number of input samples to advance
                 assert (convolved.sizes["time"] / self._ratio).denominator == 1
                 used = int(convolved.sizes["time"] / self._ratio)
-                buffer = buffer.isel(time=np.s_[used:])
-                buffer.attrs["time_bias"] += used
+                buffer = isel_time(buffer, np.s_[used:])

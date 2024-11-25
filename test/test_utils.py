@@ -5,7 +5,7 @@
 import pytest
 import xarray as xr
 
-from katcbf_vlbi_resample.utils import concat_time
+from katcbf_vlbi_resample.utils import concat_time, isel_time
 
 
 class TestConcatTime:
@@ -54,3 +54,51 @@ class TestConcatTime:
         array2.coords["pol"] = ["l", "r"]
         with pytest.raises(ValueError):
             concat_time([array2, array2])
+
+
+class TestIselTime:
+    """Tests for :func:`katcbf_vlbi_resample.utils.isel_time`."""
+
+    @pytest.fixture
+    def array(self, xp) -> xr.DataArray:
+        """Build an array to use as a fixture."""
+        return xr.DataArray(
+            xp.array([3, 1, 4, 1, 5, 9, 2, 6, 5]),
+            dims=("time",),
+            attrs={"time_bias": 100},
+        )
+
+    def test_basic(self, xp, array: xr.DataArray) -> None:
+        """Test simplest case."""
+        out = isel_time(array, xp.s_[3:6])
+        xp.testing.assert_array_equal(out.data, [1, 5, 9])
+        assert out.attrs["time_bias"] == 103
+
+    def test_explicit_step(self, xp, array: xr.DataArray) -> None:
+        """Test that explicit step size of 1 is accepted."""
+        out = isel_time(array, xp.s_[3:6:1])
+        xp.testing.assert_array_equal(out.data, [1, 5, 9])
+        assert out.attrs["time_bias"] == 103
+
+    def test_empty_start(self, xp, array: xr.DataArray) -> None:
+        """Test that an unspecified start index works as expected."""
+        out = isel_time(array, xp.s_[:4])
+        xp.testing.assert_array_equal(out.data, [3, 1, 4, 1])
+        assert out.attrs["time_bias"] == 100
+
+    def test_empty_end(self, xp, array: xr.DataArray) -> None:
+        """Test that an unspecified end index works as expected."""
+        out = isel_time(array, xp.s_[4:])
+        xp.testing.assert_array_equal(out.data, [5, 9, 2, 6, 5])
+        assert out.attrs["time_bias"] == 104
+
+    def test_negative_start(self, xp, array: xr.DataArray) -> None:
+        """Test that a negative start index works as expected."""
+        out = isel_time(array, xp.s_[-6:6])
+        xp.testing.assert_array_equal(out.data, [1, 5, 9])
+        assert out.attrs["time_bias"] == 103
+
+    def test_bad_step(self, xp, array: xr.DataArray) -> None:
+        """Test that a non-unity step raises an exception."""
+        with pytest.raises(ValueError):
+            isel_time(array, xp.s_[3:6:2])

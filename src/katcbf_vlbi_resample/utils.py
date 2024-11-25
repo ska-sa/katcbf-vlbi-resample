@@ -33,6 +33,20 @@ def concat_time(arrays: Sequence[xr.DataArray]) -> xr.DataArray:
     )
 
 
+def isel_time(array: xr.DataArray, index: slice) -> xr.DataArray:
+    """Slice an array along the time axis.
+
+    This takes care of adjusting the `time_bias` attribute of the return value.
+    The slice must have a step size of 1.
+    """
+    start, stop, step = index.indices(array.sizes["time"])
+    if step != 1:
+        raise ValueError("isel_time requires step = 1")
+    array = array.isel(time=index)
+    array.attrs["time_bias"] += start
+    return array
+
+
 def is_cupy(array: xr.DataArray) -> bool:
     """Determine whether `array` contains a cupy array."""
     return isinstance(array.data, cp.ndarray)

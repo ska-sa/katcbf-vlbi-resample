@@ -13,7 +13,7 @@ from baseband.base.encoding import TWO_BIT_1_SIGMA
 from baseband.vdif import VDIFFrame, VDIFFrameSet, VDIFHeader, VDIFPayload
 
 from .stream import Stream
-from .utils import concat_time
+from .utils import concat_time, isel_time
 
 
 @cp.fuse
@@ -114,8 +114,7 @@ class VDIFEncode2Bit:
             yield encoded
             # Cut off the piece that's been processed
             skip = n_frames * samples_per_frame
-            buffer = buffer.isel(time=np.s_[skip:])
-            buffer.attrs["time_bias"] += skip
+            buffer = isel_time(buffer, np.s_[skip:])
 
 
 class VDIFFormatter:
@@ -194,6 +193,5 @@ class VDIFFormatter:
             for i in range(n_frames):
                 word_start = i * words_per_frame
                 word_stop = (i + 1) * words_per_frame
-                frame_data = buffer.isel(time=np.s_[word_start:word_stop])
-                frame_data.attrs["time_bias"] += word_start
+                frame_data = isel_time(buffer, np.s_[word_start:word_stop])
                 yield self._frame_set(frame_data)
