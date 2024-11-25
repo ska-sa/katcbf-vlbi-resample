@@ -265,6 +265,9 @@ class Resample:
         # samples, then the filter overhangs by taps - 1 - x*d, and this must
         # be strictly less than n.
         self._fir_discard_left = (resample_params.fir_taps - 1 - n) // d + 1
+        # We need the time_bias calculation in _upfirdn to produce an integer
+        # output. That happens when t * n - fir_taps // 2 is divisible by d.
+        self._time_bias_mod = resample_params.fir_taps // 2 * pow(n, -1, mod=d) % d
         self._hilbert = _hilbert_coeff_win(resample_params.hilbert_taps)
         self._mix_freq = input_params.center_freq - output_params.center_freq
         self._input_it = iter(input_data)
@@ -283,9 +286,17 @@ class Resample:
         n, d = self._ratio.as_integer_ratio()
         for input_chunk in self._input_it:
             if buffer is None:
-                buffer = input_chunk
+                # Trim to align time_bias suitably. TODO: could instead
+                # pad on the left, then discard invalid samples, which would
+                # avoid losing good data.
+                trim = (self._time_bias_mod - int(input_chunk.attrs["time_bias"])) % d
+                if trim >= input_chunk.sizes["time"]:
+                    continue  # We'd trim away the entire chunk
+                buffer = input_chunk.isel(time=np.s_[trim:])
+                buffer.attrs["time_bias"] += trim
             else:
                 buffer = concat_time([buffer, input_chunk])
+            assert int(buffer.attrs["time_bias"]) % d == self._time_bias_mod
             n_time = buffer.sizes["time"]
             # Determine first invalid sample. Output sample x takes taps up to
             # upsampled sample x*d (inclusive). This must be strictly less
