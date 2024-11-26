@@ -28,10 +28,10 @@ def _rms(array: np.ndarray | cp.ndarray) -> np.ndarray | cp.ndarray:
 class NormalisePower(ChunkwiseStream[xr.DataArray, xr.DataArray]):
     """Normalise power level.
 
-    The power level is adjusted so that the standard deviation is `scale`.
-    This is done independently for each time series.
-
-    TODO: this does not yet use a moving window.
+    The power level is adjusted so that the standard deviation within each
+    chunk is `scale`. This is done independently for each time series. It
+    may be beneficial to use :class:`.Rechunk` prior to this filter to
+    control the chunk size.
     """
 
     def __init__(self, input_data: Stream[xr.DataArray], scale: float) -> None:
