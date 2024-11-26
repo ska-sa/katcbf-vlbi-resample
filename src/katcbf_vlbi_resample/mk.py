@@ -3,6 +3,7 @@
 """Main script for resampling MeerKAT HDF5 beamformer files."""
 
 import argparse
+import warnings
 from dataclasses import dataclass
 
 import baseband.base.encoding
@@ -12,7 +13,7 @@ import xarray as xr
 from astropy.time import Time, TimeDelta
 from baseband.helpers.sequentialfile import FileNameSequencer
 
-from . import cupy_bridge, hdf5_reader, power, resample, vdif_writer
+from . import cupy_bridge, hdf5_reader, power, rechunk, resample, vdif_writer
 from .parameters import ResampleParameters, StreamParameters
 from .stream import Stream
 
@@ -94,6 +95,29 @@ def telescope_state_parameters(telstate: katsdptelstate.TelescopeState, instrume
     )
 
 
+def _frac_seconds(time: Time) -> float:
+    """Get number of fractional seconds since last UTC second."""
+    return time.utc.ymdhms.second % 1
+
+
+def rechunk_seconds(it: Stream[xr.DataArray]) -> Stream[xr.DataArray]:
+    """Rechunk to align to UTC seconds.
+
+    The alignment will not be possible if the sample rate is not an integer
+    number of Hz. In this case, a warning will be printed.
+    """
+    # Rechunk to a chunk per UTC second. Note that this relies on having an
+    # integral sampling rate.
+    sample_rate = 1 / it.time_scale
+    if sample_rate.denominator != 1:
+        warnings.warn("Sample rate is not integral Hz, so normalisation periods will not be aligned.")
+    period = round(sample_rate)
+
+    # Fractional seconds left in the starting second
+    remainder = round(-period * _frac_seconds(it.time_base)) % period
+    return rechunk.Rechunk(it, round(sample_rate), remainder=remainder)
+
+
 def main() -> None:  # noqa: D103
     args = parse_args()
 
@@ -127,6 +151,8 @@ def main() -> None:  # noqa: D103
         it = resample.ClipTime(it, start=args.start)
     # Do the main resampling work
     it = resample.Resample(input_params, output_params, resample_params, it)
+    # Rechunk to seconds
+    it = rechunk_seconds(it)
     # Normalise the power. The baseband package uses a threshold of
     # TWO_BIT_1_SIGMA so we have to adjust the level to match.
     it = power.NormalisePower(it, baseband.base.encoding.TWO_BIT_1_SIGMA / args.threshold)
