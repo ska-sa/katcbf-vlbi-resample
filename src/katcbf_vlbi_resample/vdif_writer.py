@@ -8,12 +8,11 @@ import astropy.units as u
 import cupy as cp
 import numpy as np
 import xarray as xr
-from astropy.time import TimeDelta
 from baseband.base.encoding import TWO_BIT_1_SIGMA
 from baseband.vdif import VDIFFrame, VDIFFrameSet, VDIFHeader, VDIFPayload
 
 from .stream import Stream
-from .utils import concat_time, isel_time, time_align
+from .utils import concat_time, fraction_to_time_delta, isel_time, time_align
 
 
 @cp.fuse
@@ -169,13 +168,7 @@ class VDIFFormatter:
 
     def _frame_set(self, frame_data: xr.DataArray) -> VDIFFrameSet:
         header = self._header.copy()
-
-        time_offset = frame_data.attrs["time_bias"] * self.time_scale
-        # Manually split time_offset (a Fraction) into seconds and fractions
-        # of a second, to give a high-accuracy TimeDelta.
-        time_offset_secs = int(time_offset)
-        time_offset_frac = float(time_offset - time_offset_secs)
-        time = self.time_base + TimeDelta(time_offset_secs, time_offset_frac, scale="tai", format="sec")
+        time = self.time_base + fraction_to_time_delta(frame_data.attrs["time_bias"] * self.time_scale)
         header.set_time(time, frame_rate=self._frame_rate * u.Hz)
 
         frames = [self._frame(i, header, frame_data.sel(thread_idx)) for i, thread_idx in enumerate(self._threads)]

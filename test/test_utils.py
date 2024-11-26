@@ -2,10 +2,13 @@
 
 """Tests for :mod:`katcbf_vlbi_resample.utils."""
 
+from fractions import Fraction
+
 import pytest
 import xarray as xr
+from astropy.time import TimeDelta
 
-from katcbf_vlbi_resample.utils import concat_time, isel_time, time_align
+from katcbf_vlbi_resample.utils import concat_time, fraction_to_time_delta, isel_time, time_align
 
 
 @pytest.fixture
@@ -122,3 +125,21 @@ class TestTimeAlign:
     def test_none(self, array: xr.DataArray) -> None:
         """Test that case that the array doesn't contain a boundary."""
         assert time_align(array, 10, 9) is None
+
+
+class TestFractionToTimeDelta:
+    """Tests for :func:`katcbf_vlbi_resample.utils.fraction_to_time_delta`."""
+
+    def test_simple(self) -> None:
+        """Test the basic functionality."""
+        f = 3 + Fraction(1, 4)
+        td = fraction_to_time_delta(f)
+        assert td.scale == "tai"
+        assert td.sec == pytest.approx(3.25, rel=1e-12)
+
+    def test_precision(self) -> None:
+        """Test that there is better than nanosecond precision over large time spans."""
+        f = 1_000_000 + Fraction(123_456_789, 1_000_000_000)
+        td = fraction_to_time_delta(f)
+        td -= TimeDelta(1_000_000, format="sec", scale="tai")
+        assert td.sec == pytest.approx(0.123456789, abs=1e-10)
