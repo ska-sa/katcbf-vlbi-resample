@@ -73,7 +73,7 @@ class VDIFEncode2Bit:
         # so that the timestamp error is <=0.5 samples.
 
         # Get fractions of a second until the next second boundary.
-        frac = -input_data.time_base.utc.unix % 1
+        frac = -input_data.time_base.utc.ymdhms.second % 1
         frac_samples = frac / input_data.time_scale
         self._phase = round(frac_samples) % samples_per_frame
 
