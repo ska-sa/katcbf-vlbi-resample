@@ -14,7 +14,7 @@ from astropy.time import Time, TimeDelta
 from . import xrsig
 from .parameters import ResampleParameters, StreamParameters
 from .stream import ChunkwiseStream, Stream
-from .utils import as_cupy, concat_time
+from .utils import as_cupy, concat_time, isel_time, time_align
 
 
 def _time_delta_to_sample(dt: TimeDelta, time_scale: Fraction) -> int:
@@ -33,8 +33,7 @@ class ClipTime:
     to sample accuracy after the upstream clips to chunk accuracy.
 
     The range to select is based on sample indices, as given by
-    the `time_bias` attribute on chunks. Note that it will only
-    clip to a whole sample if `time_bias` is non-integral. Alternatively,
+    the `time_bias` attribute on chunks. Alternatively,
     one can select by absolute time by passing instances of
     :class:`astropy.time.Time`.
     """
@@ -64,7 +63,7 @@ class ClipTime:
     def __next__(self) -> xr.DataArray:
         while True:
             chunk = next(self._input_it)
-            chunk_start = int(chunk.attrs["time_bias"])
+            chunk_start: int = chunk.attrs["time_bias"]
             chunk_stop = chunk_start + chunk.sizes["time"]
             start = chunk_start if self._start is None else self._start
             stop = chunk_stop if self._stop is None else self._stop
@@ -76,8 +75,7 @@ class ClipTime:
         if start > chunk_start or stop < chunk_stop:
             slice_start = max(0, start - chunk_start)
             slice_stop = min(chunk.sizes["time"], stop - chunk_start)
-            chunk = chunk.isel(time=np.s_[slice_start:slice_stop])
-            chunk.attrs["time_bias"] += slice_start
+            chunk = isel_time(chunk, np.s_[slice_start:slice_stop])
         return chunk
 
 
@@ -137,9 +135,9 @@ def _upfirdn(h: xr.DataArray, x: xr.DataArray, ratio: Fraction) -> xr.DataArray:
     # Shift to centre the filter (upfirdn is a "full" convolution, hence
     # the reference point moves backwards in time).
     x.attrs["time_bias"] -= h.sizes["time"] // 2
-    # Downsample, being careful to ensure that time_bias is
-    # a Fraction.
-    x.attrs["time_bias"] /= Fraction(ratio.denominator)
+    # Downsample
+    assert x.attrs["time_bias"] % ratio.denominator == 0
+    x.attrs["time_bias"] //= ratio.denominator
     return x
 
 
@@ -190,7 +188,7 @@ def _split_sidebands(data: xr.DataArray, coeff: xr.DataArray) -> xr.DataArray:
     h = xrsig.convolve1d(data.imag, coeff, dim="time", mode="valid")
     # Trim the edges of 'data' to make it match up with h
     trim = coeff.sizes["time"] // 2
-    data = data.isel(time=np.s_[trim:-trim])
+    data = isel_time(data, np.s_[trim:-trim])
     lsb = data.real + h
     usb = data.real - h
     out = xr.concat(
@@ -200,7 +198,6 @@ def _split_sidebands(data: xr.DataArray, coeff: xr.DataArray) -> xr.DataArray:
     )
     out.coords["sideband"] = ["lsb", "usb"]
     out.attrs = data.attrs
-    out.attrs["time_bias"] += trim
     return out
 
 
@@ -265,6 +262,9 @@ class Resample:
         # samples, then the filter overhangs by taps - 1 - x*d, and this must
         # be strictly less than n.
         self._fir_discard_left = (resample_params.fir_taps - 1 - n) // d + 1
+        # We need the time_bias calculation in _upfirdn to produce an integer
+        # output. That happens when t * n - fir_taps // 2 is divisible by d.
+        self._time_bias_mod = resample_params.fir_taps // 2 * pow(n, -1, mod=d) % d
         self._hilbert = _hilbert_coeff_win(resample_params.hilbert_taps)
         self._mix_freq = input_params.center_freq - output_params.center_freq
         self._input_it = iter(input_data)
@@ -283,7 +283,11 @@ class Resample:
         n, d = self._ratio.as_integer_ratio()
         for input_chunk in self._input_it:
             if buffer is None:
-                buffer = input_chunk
+                # TODO: could instead pad on the left, then discard invalid
+                # samples, which would avoid discarding good data.
+                buffer = time_align(input_chunk, d, self._time_bias_mod)
+                if buffer is None:
+                    continue  # We've trimmed the entire input chunk
             else:
                 buffer = concat_time([buffer, input_chunk])
             n_time = buffer.sizes["time"]
@@ -307,11 +311,9 @@ class Resample:
                 mixed.attrs = buffer.attrs
                 convolved = _upfirdn(self._fir, mixed, self._ratio)
                 convolved = _split_sidebands(convolved, self._hilbert)
-                convolved = convolved.isel(time=np.s_[self._fir_discard_left : stop])
-                convolved.attrs["time_bias"] += self._fir_discard_left
+                convolved = isel_time(convolved, np.s_[self._fir_discard_left : stop])
                 yield convolved
                 # Number of input samples to advance
                 assert (convolved.sizes["time"] / self._ratio).denominator == 1
                 used = int(convolved.sizes["time"] / self._ratio)
-                buffer = buffer.isel(time=np.s_[used:])
-                buffer.attrs["time_bias"] += used
+                buffer = isel_time(buffer, np.s_[used:])

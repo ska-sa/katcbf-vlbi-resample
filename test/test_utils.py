@@ -2,12 +2,20 @@
 
 """Tests for :mod:`katcbf_vlbi_resample.utils."""
 
-from fractions import Fraction
-
 import pytest
 import xarray as xr
 
-from katcbf_vlbi_resample.utils import concat_time
+from katcbf_vlbi_resample.utils import concat_time, isel_time, time_align
+
+
+@pytest.fixture
+def array(xp) -> xr.DataArray:
+    """Build an array to use as a fixture."""
+    return xr.DataArray(
+        xp.array([3, 1, 4, 1, 5, 9, 2, 6, 5]),
+        dims=("time",),
+        attrs={"time_bias": 100},
+    )
 
 
 class TestConcatTime:
@@ -20,7 +28,7 @@ class TestConcatTime:
             xp.arange(10, 20, dtype=xp.uint8).reshape(2, 5),
             dims=("pol", "time"),
             coords={"pol": ["h", "v"]},
-            attrs={"time_bias": Fraction(100, 3)},
+            attrs={"time_bias": 33},
         )
 
     @pytest.fixture
@@ -30,13 +38,13 @@ class TestConcatTime:
             xp.ones((3, 2), dtype=xp.uint8),
             dims=("time", "pol"),
             coords={"pol": ["h", "v"]},
-            attrs={"time_bias": Fraction(115, 3)},
+            attrs={"time_bias": 38},
         )
 
     def test_success(self, xp, array1: xr.DataArray, array2: xr.DataArray) -> None:
         """Test the normal usage path."""
         out = concat_time([array1, array2])
-        assert out.attrs["time_bias"] == Fraction(100, 3)
+        assert out.attrs["time_bias"] == 33
         assert out.dims == ("pol", "time")
         assert out.shape == (2, 8)
         xp.testing.assert_array_equal(
@@ -56,3 +64,61 @@ class TestConcatTime:
         array2.coords["pol"] = ["l", "r"]
         with pytest.raises(ValueError):
             concat_time([array2, array2])
+
+
+class TestIselTime:
+    """Tests for :func:`katcbf_vlbi_resample.utils.isel_time`."""
+
+    def test_basic(self, xp, array: xr.DataArray) -> None:
+        """Test simplest case."""
+        out = isel_time(array, xp.s_[3:6])
+        xp.testing.assert_array_equal(out.data, [1, 5, 9])
+        assert out.attrs["time_bias"] == 103
+
+    def test_explicit_step(self, xp, array: xr.DataArray) -> None:
+        """Test that explicit step size of 1 is accepted."""
+        out = isel_time(array, xp.s_[3:6:1])
+        xp.testing.assert_array_equal(out.data, [1, 5, 9])
+        assert out.attrs["time_bias"] == 103
+
+    def test_empty_start(self, xp, array: xr.DataArray) -> None:
+        """Test that an unspecified start index works as expected."""
+        out = isel_time(array, xp.s_[:4])
+        xp.testing.assert_array_equal(out.data, [3, 1, 4, 1])
+        assert out.attrs["time_bias"] == 100
+
+    def test_empty_end(self, xp, array: xr.DataArray) -> None:
+        """Test that an unspecified end index works as expected."""
+        out = isel_time(array, xp.s_[4:])
+        xp.testing.assert_array_equal(out.data, [5, 9, 2, 6, 5])
+        assert out.attrs["time_bias"] == 104
+
+    def test_negative_start(self, xp, array: xr.DataArray) -> None:
+        """Test that a negative start index works as expected."""
+        out = isel_time(array, xp.s_[-6:6])
+        xp.testing.assert_array_equal(out.data, [1, 5, 9])
+        assert out.attrs["time_bias"] == 103
+
+    def test_bad_step(self, xp, array: xr.DataArray) -> None:
+        """Test that a non-unity step raises an exception."""
+        with pytest.raises(ValueError):
+            isel_time(array, xp.s_[3:6:2])
+
+
+class TestTimeAlign:
+    """Tests for :func:`katcbf_vlbi_resample.utils.time_align`."""
+
+    def test_trim(self, xp, array: xr.DataArray) -> None:
+        """Test the case where some data is trimmed."""
+        out = time_align(array, 10, 2)
+        assert out is not None
+        xp.testing.assert_array_equal(out.data, [4, 1, 5, 9, 2, 6, 5])
+        assert out.attrs["time_bias"] == 102
+
+    def test_no_trim(self, array: xr.DataArray) -> None:
+        """Test that case where no trimming is needed."""
+        assert time_align(array, 10) is array
+
+    def test_none(self, array: xr.DataArray) -> None:
+        """Test that case that the array doesn't contain a boundary."""
+        assert time_align(array, 10, 9) is None

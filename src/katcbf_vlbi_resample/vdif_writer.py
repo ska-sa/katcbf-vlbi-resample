@@ -2,7 +2,6 @@
 
 """Encode data to VDIF frames."""
 
-from fractions import Fraction
 from typing import Any, Final, Iterator
 
 import astropy.units as u
@@ -14,7 +13,7 @@ from baseband.base.encoding import TWO_BIT_1_SIGMA
 from baseband.vdif import VDIFFrame, VDIFFrameSet, VDIFHeader, VDIFPayload
 
 from .stream import Stream
-from .utils import concat_time
+from .utils import concat_time, isel_time, time_align
 
 
 @cp.fuse
@@ -89,18 +88,12 @@ class VDIFEncode2Bit:
         buffer = None
         for in_data in self._input_it:
             if buffer is None:
-                buffer = in_data
+                # Discard leading partial frame.
+                buffer = time_align(in_data, samples_per_frame, self._phase)
+                if buffer is None:
+                    continue  # Don't have enough data to reach the frame boundary
             else:
                 buffer = concat_time([buffer, in_data])
-            # Discard leading partial frame. For this we just work in
-            # whole samples, not worrying about fractions of a sample.
-            time_bias = round(buffer.attrs["time_bias"])
-            if time_bias % samples_per_frame != self._phase:
-                trim = (self._phase - time_bias) % samples_per_frame
-                if trim >= buffer.sizes["time"]:
-                    continue  # Don't have enough data to reach the frame boundary
-                buffer = buffer.isel(time=np.s_[trim:])
-                buffer.attrs["time_bias"] += trim
 
             n_frames = buffer.sizes["time"] // samples_per_frame
             encoded = xr.apply_ufunc(
@@ -111,12 +104,12 @@ class VDIFEncode2Bit:
                 exclude_dims={"time"},
                 keep_attrs=True,
             )
-            encoded.attrs["time_bias"] /= Fraction(self.SAMPLES_PER_WORD)
+            assert encoded.attrs["time_bias"] % self.SAMPLES_PER_WORD == 0
+            encoded.attrs["time_bias"] //= self.SAMPLES_PER_WORD
             yield encoded
             # Cut off the piece that's been processed
             skip = n_frames * samples_per_frame
-            buffer = buffer.isel(time=np.s_[skip:])
-            buffer.attrs["time_bias"] += skip
+            buffer = isel_time(buffer, np.s_[skip:])
 
 
 class VDIFFormatter:
@@ -195,6 +188,5 @@ class VDIFFormatter:
             for i in range(n_frames):
                 word_start = i * words_per_frame
                 word_stop = (i + 1) * words_per_frame
-                frame_data = buffer.isel(time=np.s_[word_start:word_stop])
-                frame_data.attrs["time_bias"] += word_start
+                frame_data = isel_time(buffer, np.s_[word_start:word_stop])
                 yield self._frame_set(frame_data)

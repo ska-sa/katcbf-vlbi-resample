@@ -24,7 +24,7 @@ class TestClipTime:
         data = xr.DataArray(
             xp.arange(1000, 50000, 100),
             dims=("time",),
-            attrs={"time_bias": Fraction(50)},
+            attrs={"time_bias": 50},
         )
         return SimpleStream(time_base, time_scale, data, 10)
 
@@ -162,7 +162,7 @@ class TestResample:
             complex_random(lambda: rng.uniform(-1.0, 1.0, size=(2, 54321)).astype(xp.float32)),
             dims=("pol", "time"),
             coords={"pol": ["h", "v"]},
-            attrs={"time_bias": Fraction(12345)},
+            attrs={"time_bias": 12345},
         )
         orig1 = SimpleStream(time_base, time_scale, data)
         orig2 = SimpleStream(time_base, time_scale, data, chunk_size)
@@ -187,7 +187,7 @@ class TestResample:
         """Check that timestamp attributes correctly yield zero group delay."""
         freqs = [400e6, 410e6, 445e6, 450e6]
         n = 100000
-        attrs = {"time_bias": Fraction(12345)}
+        attrs = {"time_bias": 12345}
         t = (xp.arange(n) + float(attrs["time_bias"])) * float(time_scale)
         tones = xp.stack([xp.exp(2j * xp.pi * (f - input_params.center_freq) * t) for f in freqs])
         data = xr.DataArray(

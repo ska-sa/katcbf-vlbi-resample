@@ -10,7 +10,7 @@ import numpy as np
 import xarray as xr
 from astropy.time import Time
 
-from katcbf_vlbi_resample.utils import is_cupy
+from katcbf_vlbi_resample.utils import is_cupy, isel_time
 
 
 def complex_random(gen_real: Callable[[], np.ndarray], /) -> np.ndarray:
@@ -42,8 +42,7 @@ class SimpleStream:
             self.chunks = []
             for start in range(0, data.sizes["time"], chunk_size):
                 stop = min(start + chunk_size, data.sizes["time"])
-                chunk = data.isel(time=np.s_[start:stop])
-                chunk.attrs["time_bias"] += start
+                chunk = isel_time(data, np.s_[start:stop])
                 self.chunks.append(chunk)
 
     def __iter__(self) -> Iterator[xr.DataArray]:

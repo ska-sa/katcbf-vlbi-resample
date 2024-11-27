@@ -33,6 +33,40 @@ def concat_time(arrays: Sequence[xr.DataArray]) -> xr.DataArray:
     )
 
 
+def isel_time(array: xr.DataArray, index: slice) -> xr.DataArray:
+    """Slice an array along the time axis.
+
+    This takes care of adjusting the `time_bias` attribute of the return value.
+    The slice must have a step size of 1.
+    """
+    start, stop, step = index.indices(array.sizes["time"])
+    if step != 1:
+        raise ValueError("isel_time requires step = 1")
+    array = array.isel(time=index)
+    array.attrs["time_bias"] += start
+    return array
+
+
+def time_align(array: xr.DataArray, modulus: int, remainder: int = 0) -> xr.DataArray | None:
+    """Trim the start of an array to ensure alignment in time.
+
+    The array is trimmed such that the ``time_bias`` of the output satisfies
+    ``time_bias % modulus == remainder % modulus``. If it is not possible to
+    do so with a non-empty array, return ``None`` instead.
+
+    If no trimming is required, the original array is returned (not a view).
+    """
+    assert 0 <= remainder < modulus
+    time_bias: int = array.attrs["time_bias"]
+    trim = (remainder - time_bias) % modulus
+    if trim >= array.sizes["time"]:
+        return None
+    elif trim == 0:
+        return array
+    else:
+        return isel_time(array, slice(trim, None, None))
+
+
 def is_cupy(array: xr.DataArray) -> bool:
     """Determine whether `array` contains a cupy array."""
     return isinstance(array.data, cp.ndarray)
