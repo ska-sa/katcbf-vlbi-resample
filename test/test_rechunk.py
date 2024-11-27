@@ -36,7 +36,9 @@ class TestRechunk:
         return data
 
     @pytest.fixture
-    def orig(self, time_base: Time, time_scale: Fraction, orig_data: xr.DataArray, cuts: Sequence[int]) -> SimpleStream:
+    def orig(
+        self, time_base: Time, time_scale: Fraction, orig_data: xr.DataArray, cuts: Sequence[int]
+    ) -> SimpleStream[xr.DataArray]:
         """Generate input data.
 
         The combined data has chunk boundaries at the sample indices
@@ -44,7 +46,7 @@ class TestRechunk:
         chunks.
         """
         sizes = [cuts[i] - cuts[i - 1] for i in range(1, len(cuts))]
-        return SimpleStream(time_base, time_scale, orig_data, sizes)
+        return SimpleStream.factory(time_base, time_scale, orig_data, sizes)
 
     @pytest.mark.parametrize(
         "cuts, out_cuts, partial, remainder",
@@ -77,7 +79,7 @@ class TestRechunk:
     )
     def test(
         self,
-        orig: SimpleStream,
+        orig: SimpleStream[xr.DataArray],
         orig_data: xr.DataArray,
         cuts: Sequence[int],
         out_cuts: Sequence[int],

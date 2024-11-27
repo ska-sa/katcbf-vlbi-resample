@@ -124,7 +124,7 @@ def rechunk_seconds(it: Stream[xr.DataArray]) -> Stream[xr.DataArray]:
     return rechunk.Rechunk(it, round(sample_rate), remainder=remainder)
 
 
-class RecordPower(power.NormalisePower):
+class RecordPower(power.MeasurePower):
     """Record power levels to a CSV file while normalising."""
 
     def __init__(self, *args, threads: list[dict[str, Any]], writer, **kwargs) -> None:
@@ -182,12 +182,11 @@ def main() -> None:  # noqa: D103
     if args.record_power is not None:
         # See csv module docs for explanation of newline=""
         power_fh = open(args.record_power, "w", newline="")
-        it = RecordPower(
-            it, baseband.base.encoding.TWO_BIT_1_SIGMA / args.threshold, threads=threads, writer=csv.writer(power_fh)
-        )
+        it_rms: power.MeasurePower = RecordPower(it, threads=threads, writer=csv.writer(power_fh))
     else:
         power_fh = None
-        it = power.NormalisePower(it, baseband.base.encoding.TWO_BIT_1_SIGMA / args.threshold)
+        it_rms = power.MeasurePower(it)
+    it = power.NormalisePower(it_rms, baseband.base.encoding.TWO_BIT_1_SIGMA / args.threshold)
     # Encode to VDIF
     it = vdif_writer.VDIFEncode2Bit(it, samples_per_frame=args.samples_per_frame)
     # Transfer back to the CPU if needed

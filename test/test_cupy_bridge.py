@@ -21,7 +21,7 @@ class TestAsCupy:
     def test(self, time_base: Time, time_scale: Fraction) -> None:
         """Test basic functionality."""
         data = xr.DataArray(np.arange(1000), dims=("time",), attrs={"time_bias": 100})
-        orig = SimpleStream(time_base, time_scale, data, 5)
+        orig = SimpleStream.factory(time_base, time_scale, data, 5)
         stream = AsCupy(orig)
         assert stream.time_base == time_base
         assert stream.time_scale == time_scale
@@ -41,7 +41,7 @@ class TestAsNumpy:
     def test(self, time_base: Time, time_scale: Fraction) -> None:
         """Test basic functionality."""
         data = xr.DataArray(cp.arange(1000), dims=("time",), attrs={"time_bias": 100})
-        orig = SimpleStream(time_base, time_scale, data, 5)
+        orig = SimpleStream.factory(time_base, time_scale, data, 5)
         stream = AsNumpy(orig)
         assert stream.time_base == time_base
         assert stream.time_scale == time_scale
