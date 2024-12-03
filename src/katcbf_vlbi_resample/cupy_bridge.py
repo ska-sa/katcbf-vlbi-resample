@@ -21,7 +21,7 @@ class AsCupy(ChunkwiseStream[xr.DataArray, xr.DataArray]):
         self.is_cupy = True
 
     def _transform(self, chunk: xr.DataArray) -> xr.DataArray:
-        return as_cupy(chunk)
+        return as_cupy(chunk, blocking=True)
 
 
 class AsNumpy:
