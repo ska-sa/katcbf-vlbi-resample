@@ -74,9 +74,9 @@ def is_cupy(array: xr.DataArray) -> bool:
     return isinstance(array.data, cp.ndarray)
 
 
-def as_cupy(array: xr.DataArray) -> xr.DataArray:
+def as_cupy(array: xr.DataArray, blocking: bool = False) -> xr.DataArray:
     """Convert `array` to hold a cupy array if necessary."""
-    return array.copy(data=cp.asarray(array.data))
+    return array.copy(data=cp.asarray(array.data, blocking=blocking))
 
 
 def fraction_to_time_delta(secs: Fraction, scale: str = "tai") -> TimeDelta:

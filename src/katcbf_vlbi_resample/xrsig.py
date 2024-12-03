@@ -12,7 +12,7 @@ import scipy.fft
 import scipy.signal
 import xarray as xr
 
-from .utils import as_cupy, is_cupy
+from .utils import is_cupy
 
 
 def _wrap_cupyx_upfirdn(h: cp.ndarray, x: cp.ndarray, *args, **kwargs):
@@ -110,11 +110,12 @@ def convolve1d(
     It always performs 1D convolution, using the `dim` argument to select
     the axis over which to convolve.
     """
-    use_cupy = is_cupy(in1) or is_cupy(in2)
+    assert is_cupy(in1) == is_cupy(in2)
+    use_cupy = is_cupy(in1)
     return xr.apply_ufunc(
         _wrap_cupyx_convolve1d if use_cupy else scipy.signal.convolve,
-        as_cupy(in1) if use_cupy else in1,  # TODO: avoid copying every time!
-        as_cupy(in2) if use_cupy else in2,
+        in1,
+        in2,
         vectorize=not use_cupy,  # Doesn't work for cupy
         input_core_dims=[[dim], [dim]],
         output_core_dims=[(dim,)],

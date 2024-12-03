@@ -275,8 +275,8 @@ class Resample:
         self.is_cupy = input_data.is_cupy
         if input_data.is_cupy:
             # Transfer filters to the GPU once
-            self._fir = as_cupy(self._fir)
-            self._hilbert = as_cupy(self._hilbert)
+            self._fir = as_cupy(self._fir, blocking=True)
+            self._hilbert = as_cupy(self._hilbert, blocking=True)
 
     def __iter__(self) -> Iterator[xr.DataArray]:
         buffer = None
