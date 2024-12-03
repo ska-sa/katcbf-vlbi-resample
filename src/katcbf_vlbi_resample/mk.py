@@ -124,8 +124,8 @@ def rechunk_seconds(it: Stream[xr.DataArray]) -> Stream[xr.DataArray]:
     return rechunk.Rechunk(it, round(sample_rate), remainder=remainder)
 
 
-class RecordPower(power.MeasurePower):
-    """Record power levels to a CSV file while normalising."""
+class RecordPower(power.RecordPower):
+    """Record power levels to a CSV file."""
 
     def __init__(self, *args, threads: list[dict[str, Any]], writer, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -177,15 +177,16 @@ def main() -> None:  # noqa: D103
     it = resample.Resample(input_params, output_params, resample_params, it)
     # Rechunk to seconds
     it = rechunk_seconds(it)
-    # Normalise the power. The baseband package uses a threshold of
-    # TWO_BIT_1_SIGMA so we have to adjust the level to match.
+    # Measure the power level, for both normalisation and optionally recording
+    it_rms: Stream[xr.Dataset] = power.MeasurePower(it)
     if args.record_power is not None:
         # See csv module docs for explanation of newline=""
         power_fh = open(args.record_power, "w", newline="")
-        it_rms: power.MeasurePower = RecordPower(it, threads=threads, writer=csv.writer(power_fh))
+        it_rms = RecordPower(it_rms, threads=threads, writer=csv.writer(power_fh))
     else:
         power_fh = None
-        it_rms = power.MeasurePower(it)
+    # Normalise the power. The baseband package uses a threshold of
+    # TWO_BIT_1_SIGMA so we have to adjust the level to match.
     it = power.NormalisePower(it_rms, baseband.base.encoding.TWO_BIT_1_SIGMA / args.threshold)
     # Encode to VDIF
     it = vdif_writer.VDIFEncode2Bit(it, samples_per_frame=args.samples_per_frame)

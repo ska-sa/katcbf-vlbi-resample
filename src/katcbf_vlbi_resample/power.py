@@ -2,6 +2,7 @@
 
 """Normalise power level prior to quantisation."""
 
+from abc import abstractmethod
 from collections import deque
 from dataclasses import dataclass
 from typing import Literal
@@ -45,20 +46,33 @@ class MeasurePower(ChunkwiseStream[xr.Dataset, xr.DataArray]):
     It may be beneficial to use :class:`.Rechunk` prior to this filter to
     control the chunk size.
 
-    Subclasses may override :meth:`record_rms` to store the root mean square
-    (RMS) voltage values.
-
     The output stream contains Datasets rather than DataArrays. The Dataset
     has members `data` (containing the original data) and `rms` (containing
     the RMS voltages without a time axis).
     """
 
+    def _transform(self, chunk: xr.DataArray) -> xr.Dataset:
+        assert chunk.dtype.kind == "f", "only real floating-point data is supported"
+        rms = xr.apply_ufunc(_rms, chunk, input_core_dims=[["time"]], output_dtypes=[chunk.dtype])
+        rms.name = "rms"
+        return xr.Dataset({"data": chunk, "rms": rms})
+
+
+class RecordPower(ChunkwiseStream[xr.Dataset, xr.Dataset]):
+    """Record history of power levels.
+
+    This stream should be inserted immediately after :class:`MeasurePower`.
+    It passes the chunks through unchanged, but invokes a callback function
+    to save power levels.
+    """
+
     _MAX_HISTORY = 64  # Maximum depth for rms_history deque
 
-    def __init__(self, input_data: Stream[xr.DataArray]) -> None:
+    def __init__(self, input_data: Stream[xr.Dataset]) -> None:
         super().__init__(input_data)
         self._rms_history: deque[_RmsHistoryEntry] = deque()
 
+    @abstractmethod
     def record_rms(self, start: int, length: int, rms: xr.DataArray) -> None:
         """Record the RMS values.
 
@@ -80,17 +94,16 @@ class MeasurePower(ChunkwiseStream[xr.Dataset, xr.DataArray]):
         """
         pass  # pragma: nocover
 
-    def _transform(self, chunk: xr.DataArray) -> xr.Dataset:
-        assert chunk.dtype.kind == "f", "only real floating-point data is supported"
-        rms = xr.apply_ufunc(_rms, chunk, input_core_dims=[["time"]], output_dtypes=[chunk.dtype])
-        rms.name = "rms"
-
+    def _transform(self, chunk: xr.Dataset) -> xr.Dataset:
+        # Duplicate since the downstream owns the chunk once it's yielded
+        rms = chunk["rms"].copy()
+        data = chunk["data"]
         if isinstance(rms.data, cp.ndarray):
             rms_out = cupyx.empty_like_pinned(rms.data)
             rms_np = rms.copy(data=cp.asnumpy(rms.data, out=rms_out, blocking=False))
             event = cp.cuda.Event(disable_timing=True)
             event.record()
-            entry = _RmsHistoryEntry(chunk.attrs["time_bias"], chunk.sizes["time"], rms_np, event)
+            entry = _RmsHistoryEntry(data.attrs["time_bias"], data.sizes["time"], rms_np, event)
             self._rms_history.append(entry)
             if len(self._rms_history) > self._MAX_HISTORY:
                 self._rms_history[0].event.synchronize()
@@ -98,9 +111,9 @@ class MeasurePower(ChunkwiseStream[xr.Dataset, xr.DataArray]):
                 entry = self._rms_history.popleft()
                 self.record_rms(entry.start, entry.length, entry.rms)
         else:
-            self.record_rms(chunk.attrs["time_bias"], chunk.sizes["time"], rms)
+            self.record_rms(data.attrs["time_bias"], data.sizes["time"], rms)
 
-        return xr.Dataset({"data": chunk, "rms": rms})
+        return chunk
 
     def __next__(self) -> xr.Dataset:
         try:

@@ -9,13 +9,13 @@ import pytest
 import xarray as xr
 from astropy.time import Time
 
-from katcbf_vlbi_resample.power import MeasurePower, NormalisePower
+from katcbf_vlbi_resample.power import MeasurePower, NormalisePower, RecordPower
 from katcbf_vlbi_resample.utils import concat_time, is_cupy, isel_time
 
 from . import SimpleStream
 
 
-class StoreRms(MeasurePower):
+class StoreRms(RecordPower):
     """Subclass that stores RMS history in a list."""
 
     _MAX_HISTORY = 5  # Override base class value to test flushing
@@ -27,7 +27,6 @@ class StoreRms(MeasurePower):
     def record_rms(self, start: int, length: int, rms: xr.DataArray) -> None:  # noqa: D102
         assert not is_cupy(rms)
         self.history.append((start, length, rms))
-        super().record_rms(start, length, rms)
 
 
 class TestMeasurePower:
@@ -46,7 +45,7 @@ class TestMeasurePower:
         data[0] *= 2  # Give the pols different scales
         data[1, 10000:30000] *= 3  # Introduce variation in time
         stream = SimpleStream.factory(time_base, time_scale, data, 10000)
-        norm = StoreRms(stream)
+        norm = MeasurePower(stream)
         assert norm.time_base == time_base
         assert norm.time_scale == time_scale
         assert norm.channels is None
@@ -67,62 +66,87 @@ class TestMeasurePower:
         expected_rms = expected_rms.copy(data=out_rms)
         xr.testing.assert_identical(out_rms, expected_rms)
 
-        assert len(norm.history) == 10
-        for i, (start, length, rms) in enumerate(norm.history):
-            assert start == 123 + 10000 * i
-            assert length == 10000
-            xr.testing.assert_identical(rms, expected_rms.isel(time=i).as_numpy())
+        # assert len(norm.history) == 10
+        # for i, (start, length, rms) in enumerate(norm.history):
+        #    assert start == 123 + 10000 * i
+        #    assert length == 10000
+        #    xr.testing.assert_identical(rms, expected_rms.isel(time=i).as_numpy())
+
+
+@pytest.fixture
+def orig_data(xp) -> xr.DataArray:
+    """Test data samples."""
+    return xr.DataArray(
+        xp.arange(12, dtype=xp.float32).reshape(2, 6),
+        dims=("pol", "time"),
+        coords={"pol": ["h", "v"]},
+        attrs={"time_bias": 123},
+    )
+
+
+@pytest.fixture
+def orig_rms(xp) -> xr.DataArray:
+    """RMS values.
+
+    These are not actual RMS values from orig_data. They've chosen to be
+    make it easy to compute the expected outputs.
+    """
+    return xr.DataArray(
+        xp.array(
+            [
+                [4.0, 8.0],
+                [1.0, 1.0],
+                [3.0, 1.5],
+            ],
+            dtype=xp.float32,
+        ),
+        dims=("chunk", "pol"),
+        coords={"pol": ["h", "v"]},
+    )
+
+
+@pytest.fixture
+def orig(
+    xp, time_base: Time, time_scale: Fraction, orig_data: xr.DataArray, orig_rms: xr.DataArray
+) -> SimpleStream[xr.Dataset]:
+    """Input stream."""
+    chunks = [
+        xr.Dataset(
+            {"data": isel_time(orig_data, xp.s_[i * 2 : (i + 1) * 2]).copy(), "rms": orig_rms.isel(chunk=i).copy()}
+        )
+        for i in range(orig_rms.sizes["chunk"])
+    ]
+    return SimpleStream(
+        time_base=time_base,
+        time_scale=time_scale,
+        channels=None,
+        is_cupy=is_cupy(orig_data),
+        chunks=chunks,
+    )
+
+
+class TestRecordPower:
+    """Test :class:`.RecordPower`."""
+
+    def test(self, xp, orig_rms: xr.DataArray, orig: SimpleStream[xr.Dataset]) -> None:  # noqa: D102
+        output = []
+        recorder = StoreRms(orig)
+        for chunk in recorder:
+            output.append(chunk["rms"])
+        output_array = xr.concat(output, dim="chunk")
+        orig_rms.name = "rms"
+        xr.testing.assert_identical(output_array, orig_rms)
+
+        assert len(recorder.history) == len(output)
+        for i, (start, length, rms) in enumerate(recorder.history):
+            assert start == 123 + 2 * i
+            assert length == 2
+        history_array = xr.concat([entry[2] for entry in recorder.history], dim="chunk")
+        xr.testing.assert_identical(history_array, orig_rms.as_numpy())
 
 
 class TestNormalisePower:
     """Test :class:`.NormalisePower`."""
-
-    @pytest.fixture
-    def orig_data(self, xp) -> xr.DataArray:
-        """Test data samples."""
-        return xr.DataArray(
-            xp.arange(12, dtype=xp.float32).reshape(2, 6),
-            dims=("pol", "time"),
-            coords={"pol": ["h", "v"]},
-            attrs={"time_bias": 123},
-        )
-
-    @pytest.fixture
-    def orig_rms(self, xp) -> xr.DataArray:
-        """RMS values.
-
-        These are not actual RMS values from orig_data. They've chosen to be
-        make it easy to compute the expected outputs.
-        """
-        return xr.DataArray(
-            xp.array(
-                [
-                    [4.0, 8.0],
-                    [1.0, 1.0],
-                    [3.0, 1.5],
-                ],
-                dtype=xp.float32,
-            ),
-            dims=("chunk", "pol"),
-            coords={"pol": ["h", "v"]},
-        )
-
-    @pytest.fixture
-    def orig(
-        self, xp, time_base: Time, time_scale: Fraction, orig_data: xr.DataArray, orig_rms: xr.DataArray
-    ) -> SimpleStream[xr.Dataset]:
-        """Input stream."""
-        chunks = [
-            xr.Dataset({"data": isel_time(orig_data, xp.s_[i * 2 : (i + 1) * 2]), "rms": orig_rms.isel(chunk=i)})
-            for i in range(orig_rms.sizes["chunk"])
-        ]
-        return SimpleStream(
-            time_base=time_base,
-            time_scale=time_scale,
-            channels=None,
-            is_cupy=is_cupy(orig_data),
-            chunks=chunks,
-        )
 
     def _test_stream_attributes(self, norm: NormalisePower, orig: SimpleStream) -> None:
         assert norm.time_base == orig.time_base
