@@ -179,7 +179,7 @@ class NormalisePower(ChunkwiseStream[xr.DataArray, xr.Dataset]):
                 mul = self.scale / np.sqrt(self.power)  # type: ignore
                 mul = mul.reindex_like(chunk["data"], copy=False)
                 if self.is_cupy:
-                    mul = as_cupy(mul)
+                    mul = as_cupy(mul, blocking=False)
                 else:
                     mul = mul.as_numpy()
                 self._mul = mul

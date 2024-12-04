@@ -11,6 +11,7 @@ from typing import Any
 import baseband.base.encoding
 import h5py
 import katsdptelstate
+import numpy as np
 import xarray as xr
 from astropy.time import Time, TimeDelta
 from baseband.helpers.sequentialfile import FileNameSequencer
@@ -21,7 +22,7 @@ from .stream import Stream
 from .utils import fraction_to_time_delta
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(threads: list[dict[str, str]]) -> argparse.Namespace:
     """Parse the command-line arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -68,6 +69,11 @@ def parse_args() -> argparse.Namespace:
     proc_group.add_argument(
         "--threshold", type=float, default=0.969, help="Threshold (in σ) between quantisation levels [%(default)s]"
     )
+    proc_group.add_argument(
+        "--normalise",
+        default="auto",
+        help="Power normalisation method (auto, first, or 4 comma-separated values) [%(default)s]",
+    )
     proc_group.add_argument("--cpu", action="store_true", help="Process on the CPU only")
 
     args = parser.parse_args()
@@ -75,6 +81,23 @@ def parse_args() -> argparse.Namespace:
         args.start = Time(args.start, scale="utc")
     if args.duration is not None:
         args.duration = TimeDelta(args.duration, scale="tai", format="sec")
+    if args.normalise not in {"auto", "first"}:
+        try:
+            values = [np.float32(x) for x in args.normalise.split(",")]
+            if len(values) != 4:
+                raise ValueError
+        except ValueError:
+            parser.error("--power must be 'auto', 'first' or a 4 comma-separated real values")
+        args.normalise = xr.DataArray(
+            np.zeros((2, 2), dtype=np.float32),
+            dims=("sideband", "pol"),
+            coords={
+                "sideband": ["lsb", "usb"],
+                "pol": ["pol0", "pol1"],
+            },
+        )
+        for value, thread in zip(values, threads):
+            args.normalise.loc[thread] = value
 
     return args
 
@@ -142,8 +165,8 @@ class RecordPower(power.RecordPower):
 
 
 def main() -> None:  # noqa: D103
-    args = parse_args()
     threads = [{"sideband": sideband, "pol": pol} for sideband in ["lsb", "usb"] for pol in ["pol0", "pol1"]]
+    args = parse_args(threads)
 
     telstate = katsdptelstate.TelescopeState()
     telstate.load_from_file(args.telstate)
@@ -187,7 +210,7 @@ def main() -> None:  # noqa: D103
         power_fh = None
     # Normalise the power. The baseband package uses a threshold of
     # TWO_BIT_1_SIGMA so we have to adjust the level to match.
-    it = power.NormalisePower(it_rms, baseband.base.encoding.TWO_BIT_1_SIGMA / args.threshold)
+    it = power.NormalisePower(it_rms, baseband.base.encoding.TWO_BIT_1_SIGMA / args.threshold, power=args.normalise)
     # Encode to VDIF
     it = vdif_writer.VDIFEncode2Bit(it, samples_per_frame=args.samples_per_frame)
     # Transfer back to the CPU if needed
