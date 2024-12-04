@@ -66,12 +66,6 @@ class TestMeasurePower:
         expected_rms = expected_rms.copy(data=out_rms)
         xr.testing.assert_identical(out_rms, expected_rms)
 
-        # assert len(norm.history) == 10
-        # for i, (start, length, rms) in enumerate(norm.history):
-        #    assert start == 123 + 10000 * i
-        #    assert length == 10000
-        #    xr.testing.assert_identical(rms, expected_rms.isel(time=i).as_numpy())
-
 
 @pytest.fixture
 def orig_data(xp) -> xr.DataArray:
