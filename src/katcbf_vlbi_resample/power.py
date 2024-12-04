@@ -158,8 +158,6 @@ class NormalisePower(ChunkwiseStream[xr.DataArray, xr.Dataset]):
             dimensions as the data.
     """
 
-    _MAX_HISTORY = 64  # Maximum depth for rms_history deque
-
     def __init__(
         self, input_data: Stream[xr.Dataset], scale: float, power: Literal["auto", "first"] | xr.DataArray = "auto"
     ) -> None:
