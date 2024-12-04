@@ -2,6 +2,7 @@
 
 """Load data from MeerKAT beamformer HDF5 files."""
 
+from collections import deque
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
@@ -73,6 +74,24 @@ class _HDF5Input:
         )
 
 
+class _PinnedBuffer:
+    """Transfer pinned in CUDA pinned memory."""
+
+    def __init__(self, shape: tuple[int, ...], dtype: np.dtype) -> None:
+        self._data = cupyx.empty_pinned(shape, dtype)
+        self._event: cp.cuda.Event | None = None
+
+    def get(self) -> np.ndarray:
+        """Get the array, waiting for any recorded event."""
+        if self._event is not None:
+            self._event.synchronize()
+        return self._data
+
+    def put(self, event: cp.cuda.Event) -> None:
+        """Record that the array is in use for an asynchronous transfer."""
+        self._event = event
+
+
 class HDF5Reader:
     """Load data from a MeerKAT beamformer HDF5 file."""
 
@@ -123,32 +142,41 @@ class HDF5Reader:
     def __iter__(self) -> Iterator[xr.DataArray]:
         chunk_spectra = self._inputs[0].bf_raw.chunks[1]
         chunk_adc = self._step_ts_adc * chunk_spectra
+        transfer_shape = (len(self._inputs), self.channels, chunk_spectra, 2)
+        dtype = self._inputs[0].bf_raw.dtype
+        if self.is_cupy:
+            transfer_bufs = deque(_PinnedBuffer(transfer_shape, dtype) for _ in range(3))
         for ts0 in range(self._start_ts_adc, self._stop_ts_adc, chunk_adc):
             ts1 = min(ts0 + chunk_adc, self._stop_ts_adc)
             spectrum0 = ts0 // self._step_ts_adc
             spectrum1 = ts1 // self._step_ts_adc
             if self.is_cupy:
-                empty = cupyx.empty_pinned
                 xp = cp
+                transfer_buf = transfer_bufs.popleft()
+                store = transfer_buf.get()
             else:
-                empty = np.empty
                 xp = np
-            store = empty(
-                (len(self._inputs), self.channels, spectrum1 - spectrum0, 2),
-                self._inputs[0].bf_raw.dtype,
-            )
+                store = np.empty(transfer_shape, dtype)
             for i, f in enumerate(self._inputs):
                 f.bf_raw.read_direct(
                     store,
                     np.s_[:, f.offset + spectrum0 : f.offset + spectrum1, :],
-                    np.s_[i, :, :, :],
+                    np.s_[i, :, : spectrum1 - spectrum0, :],
                 )
+            # Trim the array if this is the last chunk and it's short. We
+            # don't do this earlier because read_direct wants contiguous memory.
+            device_store = xp.asarray(store[:, :, : spectrum1 - spectrum0, :])
+            if self.is_cupy:
+                event = cp.cuda.Event(disable_timing=True)
+                event.record()
+                transfer_buf.put(event)
+                transfer_bufs.append(transfer_buf)
             # Convert Gaussian integers to complex. TODO: nan out missing data
             # Also transpose the time and channel axes. That's not actually
             # required, but it ends up happening eventually, and it's cheaper
             # to do it early (before converting int8 -> float32).
             yield xr.DataArray(
-                xp.require(xp.asarray(store).transpose(0, 2, 1, 3), np.float32, "C").view(np.complex64)[..., 0],
+                xp.require(device_store.transpose(0, 2, 1, 3), np.float32, "C").view(np.complex64)[..., 0],
                 dims=("pol", "time", "channel"),
                 coords={"pol": [f.name for f in self._inputs]},
                 attrs={"time_bias": ts0 // self._step_ts_adc},
