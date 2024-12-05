@@ -2,17 +2,21 @@
 
 """Wrap various scipy signal processing functions for use with xarray."""
 
+import warnings
 from collections.abc import Hashable
 
 import cupy as cp
 import cupyx.scipy.fft
-import cupyx.scipy.signal
 import numpy as np
 import scipy.fft
 import scipy.signal
 import xarray as xr
 
 from .utils import is_cupy
+
+# cupyx.scipy.signal reports a warning on import.
+warnings.filterwarnings("ignore", message=r"cupyx\.jit\.rawkernel is experimental", category=FutureWarning)
+import cupyx.scipy.signal  # noqa: E402
 
 
 def _wrap_cupyx_upfirdn(h: cp.ndarray, x: cp.ndarray, *args, **kwargs):
