@@ -22,10 +22,12 @@ import xarray as xr
 from astropy.time import Time, TimeDelta
 from atomicwrites import atomic_write
 from baseband.helpers.sequentialfile import FileNameSequencer
+from rich.console import Console
+from rich.progress import Progress
 
 from . import cupy_bridge, hdf5_reader, power, rechunk, resample, vdif_writer
 from .parameters import ResampleParameters, StreamParameters
-from .stream import Stream
+from .stream import ChunkwiseStream, Stream
 from .utils import fraction_to_time_delta
 
 
@@ -224,11 +226,40 @@ class RecordPower(power.RecordPower):
         self._writer.writerow(values)
 
 
+class ProgressStream(ChunkwiseStream[xr.DataArray, xr.DataArray]):
+    """Stream that shows a progress bar on the console.
+
+    To facilitate setting up the streams prior to putting up the progress bar,
+    the progress bar is registered later by calling :meth:`set_progress`.
+    """
+
+    def __init__(self, input_data: Stream[xr.DataArray]) -> None:
+        super().__init__(input_data)
+        self._progress: Progress | None = None
+        self._task_id = 0
+
+    def set_progress(self, progress: Progress, task_id: int) -> None:
+        """Register the progress bar that will be updated.
+
+        The task must have a total that equals the total number of time
+        samples across all chunks.
+        """
+        self._progress = progress
+        self._task_id = task_id
+
+    def _transform(self, chunk: xr.DataArray) -> xr.DataArray:
+        if self._progress is not None:
+            self._progress.update(self._task_id, advance=chunk.sizes["time"])
+        return chunk
+
+
 def main() -> None:  # noqa: D103
+    console = Console()
     threads = [{"sideband": sideband, "pol": pol} for sideband in ["lsb", "usb"] for pol in ["pol0", "pol1"]]
     args = parse_args(threads)
 
-    telstate_params = telescope_state_parameters_from_file(args.telstate, args.instrument)
+    with console.status("Loading telescope state parameters..."):
+        telstate_params = telescope_state_parameters_from_file(args.telstate, args.instrument)
 
     input_params = StreamParameters(bandwidth=telstate_params.bandwidth, center_freq=telstate_params.center_freq)
     output_params = StreamParameters(bandwidth=args.bandwidth, center_freq=args.frequency)
@@ -238,7 +269,7 @@ def main() -> None:  # noqa: D103
     # rdcc_nbytes sets the chunk cache size. MK HDF5 files tend to have 32MB chunks
     # while the default cache size is much smaller than that, so we need to increase
     # it to actually be able to use the chunk cache.
-    it: Stream[xr.DataArray] = hdf5_reader.HDF5Reader(
+    reader = hdf5_reader.HDF5Reader(
         {
             f"pol{i}": h5py.File(input_file, "r", rdcc_nbytes=128 * 1024 * 1024)
             for i, input_file in enumerate(args.input)
@@ -249,8 +280,10 @@ def main() -> None:  # noqa: D103
         duration=args.duration,
         is_cupy=is_cupy,
     )
+    n_spectra = reader.stop_spectrum - reader.start_spectrum
+    progress_it = ProgressStream(reader)
     # Convert back to time domain
-    it = resample.IFFT(it)
+    it: Stream[xr.DataArray] = resample.IFFT(progress_it)
     # Get more accurate start time, now that we can do so with per-sample accuracy
     if args.start is not None:
         it = resample.ClipTime(it, start=args.start)
@@ -277,16 +310,18 @@ def main() -> None:  # noqa: D103
     frameset_it = vdif_writer.VDIFFormatter(it, threads, station=args.station, samples_per_frame=args.samples_per_frame)
 
     # The above just sets up an iterator. Now use it to write to file.
-    print("Ready to start")
     fns = iter(FileNameSequencer(args.output))
     fh: baseband.vdif.VDIFFileWriter | None = None
     try:
-        for frameset in frameset_it:
-            if fh is None or fh.tell() + frameset.nbytes > args.file_size:
-                if fh is not None:
-                    fh.close()
-                fh = baseband.vdif.open(next(fns), "wb")
-            frameset.tofile(fh)
+        with Progress() as progress:
+            task_id = progress.add_task("Processing...", total=n_spectra)
+            progress_it.set_progress(progress, task_id)
+            for frameset in frameset_it:
+                if fh is None or fh.tell() + frameset.nbytes > args.file_size:
+                    if fh is not None:
+                        fh.close()
+                    fh = baseband.vdif.open(next(fns), "wb")
+                frameset.tofile(fh)
     finally:
         if fh is not None:
             fh.close()
