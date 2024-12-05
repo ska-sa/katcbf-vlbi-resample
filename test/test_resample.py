@@ -19,14 +19,14 @@ class TestClipTime:
     """Test :class:`.ClipTime`."""
 
     @pytest.fixture
-    def orig(self, xp, time_base: Time, time_scale: Fraction) -> SimpleStream:
+    def orig(self, xp, time_base: Time, time_scale: Fraction) -> SimpleStream[xr.DataArray]:
         """Input stream."""
         data = xr.DataArray(
             xp.arange(1000, 50000, 100),
             dims=("time",),
             attrs={"time_bias": 50},
         )
-        return SimpleStream(time_base, time_scale, data, 10)
+        return SimpleStream.factory(time_base, time_scale, data, 10)
 
     @pytest.mark.parametrize(
         "start,stop,time_bias,n",
@@ -40,7 +40,7 @@ class TestClipTime:
     def test_overlap(
         self,
         xp,
-        orig: SimpleStream,
+        orig: SimpleStream[xr.DataArray],
         start: int | None,
         stop: int | None,
         time_bias: int,
@@ -64,7 +64,7 @@ class TestClipTime:
         "start,stop",
         [(10, 40), (10, 50), (None, 40), (540, 1000), (550, 1000), (540, None)],
     )
-    def test_no_overlap(self, orig: SimpleStream, start: int | None, stop: int | None) -> None:
+    def test_no_overlap(self, orig: SimpleStream[xr.DataArray], start: int | None, stop: int | None) -> None:
         """Test where selected range does not overlap the data."""
         clip = ClipTime(orig, start, stop)
         assert clip.time_base == orig.time_base
@@ -72,7 +72,7 @@ class TestClipTime:
         chunks = list(clip)
         assert not chunks
 
-    def test_absolute_time(self, orig: SimpleStream) -> None:
+    def test_absolute_time(self, orig: SimpleStream[xr.DataArray]) -> None:
         """Test absolute times for start and stop."""
         clip = ClipTime(orig, Time("2024-07-20T12:00:02.25", scale="utc"), Time("2024-07-20T12:00:02.75", scale="utc"))
         assert clip._start == 320000
@@ -95,7 +95,7 @@ class TestIFFT:
             dims=("time", "channel"),
             attrs={"time_bias": 4321},
         )
-        stream = SimpleStream(time_base, time_scale, freq_data_xr, 10)
+        stream = SimpleStream.factory(time_base, time_scale, freq_data_xr, 10)
         ifft = IFFT(stream)
         assert ifft.channels is None
         assert ifft.time_base == stream.time_base
@@ -107,7 +107,7 @@ class TestIFFT:
     def test_no_channels(self, xp, time_base: Time, time_scale: Fraction) -> None:
         """Test error handling when the input stream is not channelised."""
         data = xr.DataArray(xp.zeros(100), dims=("time",), attrs={"time_bias": 0})
-        stream = SimpleStream(time_base, time_scale, data)
+        stream = SimpleStream.factory(time_base, time_scale, data)
         with pytest.raises(TypeError):
             IFFT(stream)
 
@@ -164,8 +164,8 @@ class TestResample:
             coords={"pol": ["h", "v"]},
             attrs={"time_bias": 12345},
         )
-        orig1 = SimpleStream(time_base, time_scale, data)
-        orig2 = SimpleStream(time_base, time_scale, data, chunk_size)
+        orig1 = SimpleStream.factory(time_base, time_scale, data)
+        orig2 = SimpleStream.factory(time_base, time_scale, data, chunk_size)
         resample1 = Resample(input_params, output_params, resample_params, orig1)
         resample2 = Resample(input_params, output_params, resample_params, orig2)
         out1 = list(resample1)
@@ -196,7 +196,7 @@ class TestResample:
             coords={"freq": freqs},
             attrs=attrs,
         )
-        orig = SimpleStream(time_base, time_scale, data)
+        orig = SimpleStream.factory(time_base, time_scale, data)
         resample = Resample(input_params, output_params, resample_params, orig)
         out = list(resample)
         assert len(out) == 1

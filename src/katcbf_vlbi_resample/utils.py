@@ -3,9 +3,11 @@
 """Miscellaneous utilities."""
 
 from collections.abc import Sequence
+from fractions import Fraction
 
 import cupy as cp
 import xarray as xr
+from astropy.time import TimeDelta
 
 
 def concat_time(arrays: Sequence[xr.DataArray]) -> xr.DataArray:
@@ -75,3 +77,12 @@ def is_cupy(array: xr.DataArray) -> bool:
 def as_cupy(array: xr.DataArray, blocking: bool = False) -> xr.DataArray:
     """Convert `array` to hold a cupy array if necessary."""
     return array.copy(data=cp.asarray(array.data, blocking=blocking))
+
+
+def fraction_to_time_delta(secs: Fraction, scale: str = "tai") -> TimeDelta:
+    """Convert a fraction in seconds to a TimeDelta."""
+    days = secs / 86400
+    # To get maximum accuracy, split into integer and fractional parts and
+    # convert them separately to float.
+    days_int = round(days)
+    return TimeDelta(days_int, float(days - days_int), format="jd", scale=scale)

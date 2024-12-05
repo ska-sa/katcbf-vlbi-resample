@@ -3,21 +3,26 @@
 """Main script for resampling MeerKAT HDF5 beamformer files."""
 
 import argparse
+import csv
+import warnings
 from dataclasses import dataclass
+from typing import Any
 
 import baseband.base.encoding
 import h5py
 import katsdptelstate
+import numpy as np
 import xarray as xr
 from astropy.time import Time, TimeDelta
 from baseband.helpers.sequentialfile import FileNameSequencer
 
-from . import cupy_bridge, hdf5_reader, power, resample, vdif_writer
+from . import cupy_bridge, hdf5_reader, power, rechunk, resample, vdif_writer
 from .parameters import ResampleParameters, StreamParameters
 from .stream import Stream
+from .utils import fraction_to_time_delta
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(threads: list[dict[str, str]]) -> argparse.Namespace:
     """Parse the command-line arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -43,6 +48,9 @@ def parse_args() -> argparse.Namespace:
     output_group.add_argument(
         "--file-size", type=int, default=256 * 1024 * 1024, metavar="BYTES", help="Chunk file size [256 MiB]"
     )
+    output_group.add_argument(
+        "--record-power", type=str, metavar="FILENAME", help="CSV file in which power measurements are stored [none]"
+    )
 
     proc_group = parser.add_argument_group("Processing options")
     proc_group.add_argument(
@@ -61,6 +69,11 @@ def parse_args() -> argparse.Namespace:
     proc_group.add_argument(
         "--threshold", type=float, default=0.969, help="Threshold (in σ) between quantisation levels [%(default)s]"
     )
+    proc_group.add_argument(
+        "--normalise",
+        default="auto",
+        help="Power normalisation method (auto, first, or 4 comma-separated values) [%(default)s]",
+    )
     proc_group.add_argument("--cpu", action="store_true", help="Process on the CPU only")
 
     args = parser.parse_args()
@@ -68,6 +81,23 @@ def parse_args() -> argparse.Namespace:
         args.start = Time(args.start, scale="utc")
     if args.duration is not None:
         args.duration = TimeDelta(args.duration, scale="tai", format="sec")
+    if args.normalise not in {"auto", "first"}:
+        try:
+            values = [np.float32(x) for x in args.normalise.split(",")]
+            if len(values) != 4:
+                raise ValueError
+        except ValueError:
+            parser.error("--power must be 'auto', 'first' or 4 comma-separated real values")
+        args.normalise = xr.DataArray(
+            np.zeros((2, 2), dtype=np.float32),
+            dims=("sideband", "pol"),
+            coords={
+                "sideband": ["lsb", "usb"],
+                "pol": ["pol0", "pol1"],
+            },
+        )
+        for value, thread in zip(values, threads):
+            args.normalise.loc[thread] = value
 
     return args
 
@@ -94,8 +124,49 @@ def telescope_state_parameters(telstate: katsdptelstate.TelescopeState, instrume
     )
 
 
+def _frac_seconds(time: Time) -> float:
+    """Get number of fractional seconds since last UTC second."""
+    return time.utc.ymdhms.second % 1
+
+
+def rechunk_seconds(it: Stream[xr.DataArray]) -> Stream[xr.DataArray]:
+    """Rechunk to align to UTC seconds.
+
+    The alignment will not be possible if the sample rate is not an integer
+    number of Hz. In this case, a warning will be printed.
+    """
+    # Rechunk to a chunk per UTC second. Note that this relies on having an
+    # integral sampling rate.
+    sample_rate = 1 / it.time_scale
+    if sample_rate.denominator != 1:
+        warnings.warn("Sample rate is not integral Hz, so normalisation periods will not be aligned.")
+    period = round(sample_rate)
+
+    # Fractional seconds left in the starting second
+    remainder = round(-period * _frac_seconds(it.time_base)) % period
+    return rechunk.Rechunk(it, round(sample_rate), remainder=remainder)
+
+
+class RecordPower(power.RecordPower):
+    """Record power levels to a CSV file."""
+
+    def __init__(self, *args, threads: list[dict[str, Any]], writer, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._threads = threads
+        self._writer = writer
+        # Write header
+        writer.writerow(["time"] + ["-".join(thread.values()) for thread in threads])
+
+    def record_rms(self, start: int, length: int, rms: xr.DataArray) -> None:  # noqa: D102
+        start_time = self.time_base + fraction_to_time_delta(start * self.time_scale)
+        values = [start_time.isot]
+        values.extend(rms.sel(thread).item() ** 2 for thread in self._threads)
+        self._writer.writerow(values)
+
+
 def main() -> None:  # noqa: D103
-    args = parse_args()
+    threads = [{"sideband": sideband, "pol": pol} for sideband in ["lsb", "usb"] for pol in ["pol0", "pol1"]]
+    args = parse_args(threads)
 
     telstate = katsdptelstate.TelescopeState()
     telstate.load_from_file(args.telstate)
@@ -127,15 +198,24 @@ def main() -> None:  # noqa: D103
         it = resample.ClipTime(it, start=args.start)
     # Do the main resampling work
     it = resample.Resample(input_params, output_params, resample_params, it)
+    # Rechunk to seconds
+    it = rechunk_seconds(it)
+    # Measure the power level, for both normalisation and optionally recording
+    it_rms: Stream[xr.Dataset] = power.MeasurePower(it)
+    if args.record_power is not None:
+        # See csv module docs for explanation of newline=""
+        power_fh = open(args.record_power, "w", newline="")
+        it_rms = RecordPower(it_rms, threads=threads, writer=csv.writer(power_fh))
+    else:
+        power_fh = None
     # Normalise the power. The baseband package uses a threshold of
     # TWO_BIT_1_SIGMA so we have to adjust the level to match.
-    it = power.NormalisePower(it, baseband.base.encoding.TWO_BIT_1_SIGMA / args.threshold)
+    it = power.NormalisePower(it_rms, baseband.base.encoding.TWO_BIT_1_SIGMA / args.threshold, power=args.normalise)
     # Encode to VDIF
     it = vdif_writer.VDIFEncode2Bit(it, samples_per_frame=args.samples_per_frame)
     # Transfer back to the CPU if needed
     if is_cupy:
         it = cupy_bridge.AsNumpy(it)
-    threads = [{"sideband": sideband, "pol": pol} for sideband in ["lsb", "usb"] for pol in ["pol0", "pol1"]]
     frameset_it = vdif_writer.VDIFFormatter(it, threads, station=args.station, samples_per_frame=args.samples_per_frame)
 
     # The above just sets up an iterator. Now use it to write to file.
@@ -152,6 +232,8 @@ def main() -> None:  # noqa: D103
     finally:
         if fh is not None:
             fh.close()
+        if power_fh is not None:
+            power_fh.close()
 
 
 if __name__ == "__main__":

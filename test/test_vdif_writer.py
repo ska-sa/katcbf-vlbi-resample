@@ -32,9 +32,9 @@ def input_data(xp) -> xr.DataArray:
 
 
 @pytest.fixture
-def orig(input_data: xr.DataArray, time_base: Time, time_scale: Fraction) -> SimpleStream:
+def orig(input_data: xr.DataArray, time_base: Time, time_scale: Fraction) -> SimpleStream[xr.DataArray]:
     """Input stream."""
-    return SimpleStream(time_base, time_scale, input_data, 10)
+    return SimpleStream.factory(time_base, time_scale, input_data, 10)
 
 
 class TestEncode2Bit:
@@ -56,17 +56,17 @@ class TestEncode2Bit:
 class TestVDIFEncode2Bit:
     """Tests for :class:`katcbf_vlbi_resample.vdif_writer.VDIFEncode2Bit."""
 
-    def test_bad_samples_per_frame_word_align(self, orig: SimpleStream) -> None:
+    def test_bad_samples_per_frame_word_align(self, orig: SimpleStream[xr.DataArray]) -> None:
         """Test that `samples_per_frame` not a multiple of word size raises :exc:`ValueError`."""
         with pytest.raises(ValueError, match="samples_per_frame must be a multiple of 32"):
             vdif_writer.VDIFEncode2Bit(orig, 160016)
 
-    def test_bad_samples_per_frame_rate(self, orig: SimpleStream) -> None:
+    def test_bad_samples_per_frame_rate(self, orig: SimpleStream[xr.DataArray]) -> None:
         """Test that ValueError is raised if frame rate is not an integer."""
         with pytest.raises(ValueError, match="samples_per_frame does not yield an integer frame rate"):
             vdif_writer.VDIFEncode2Bit(orig, 160032)
 
-    def test_success(self, xp, orig: SimpleStream, input_data: xr.DataArray) -> None:
+    def test_success(self, xp, orig: SimpleStream[xr.DataArray], input_data: xr.DataArray) -> None:
         """Test normal usage."""
         enc = vdif_writer.VDIFEncode2Bit(orig, 160)
         assert enc.time_base == orig.time_base
@@ -88,7 +88,7 @@ class TestVDIFFormatter:
 
     def test_channelised(self, time_base: Time, time_scale: Fraction) -> None:
         """Test that passing a channelised input raises an exception."""
-        stream = SimpleStream(
+        stream = SimpleStream.factory(
             time_base,
             time_scale,
             xr.DataArray(np.zeros((16, 16)), dims=("channel", "time"), attrs={"time_bias": 0}),
@@ -96,12 +96,12 @@ class TestVDIFFormatter:
         with pytest.raises(ValueError, match="unchannelised"):
             vdif_writer.VDIFFormatter(stream, [{}], station="me", samples_per_frame=80)
 
-    def test_bad_samples_per_frame_word_align(self, orig: SimpleStream) -> None:
+    def test_bad_samples_per_frame_word_align(self, orig: SimpleStream[xr.DataArray]) -> None:
         """Test that `samples_per_frame` not a multiple of word size raises :exc:`ValueError`."""
         with pytest.raises(ValueError, match="samples_per_frame must be a multiple of 32"):
             vdif_writer.VDIFFormatter(orig, [{}], station="me", samples_per_frame=160016)
 
-    def test_bad_samples_per_frame_rate(self, orig: SimpleStream) -> None:
+    def test_bad_samples_per_frame_rate(self, orig: SimpleStream[xr.DataArray]) -> None:
         """Test that ValueError is raised if frame rate is not an integer."""
         with pytest.raises(ValueError, match="samples_per_frame does not yield an integer frame rate"):
             vdif_writer.VDIFFormatter(orig, [{}], station="me", samples_per_frame=160032)
@@ -127,7 +127,7 @@ class TestVDIFFormatter:
             attrs={"time_bias": 320},
         )
         samples_per_frame = 160
-        orig = SimpleStream(time_base, time_scale, data, 100)
+        orig = SimpleStream.factory(time_base, time_scale, data, 100)
         enc = vdif_writer.VDIFEncode2Bit(orig, samples_per_frame)
         fmt = vdif_writer.VDIFFormatter(
             enc, [{"pol": "h"}, {"pol": "v"}], station="me", samples_per_frame=samples_per_frame
