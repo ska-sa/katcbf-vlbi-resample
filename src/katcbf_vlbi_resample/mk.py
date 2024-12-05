@@ -87,7 +87,7 @@ def parse_args(threads: list[dict[str, str]]) -> argparse.Namespace:
             if len(values) != 4:
                 raise ValueError
         except ValueError:
-            parser.error("--power must be 'auto', 'first' or a 4 comma-separated real values")
+            parser.error("--power must be 'auto', 'first' or 4 comma-separated real values")
         args.normalise = xr.DataArray(
             np.zeros((2, 2), dtype=np.float32),
             dims=("sideband", "pol"),
