@@ -10,6 +10,8 @@ astropy==6.1.1
     #   katcbf_vlbi_resample (pyproject.toml)
 astropy-iers-data==0.2024.7.15.0.31.42
     # via astropy
+atomicwrites==1.4.1
+    # via katcbf_vlbi_resample (pyproject.toml)
 baseband==4.2.0
     # via katcbf_vlbi_resample (pyproject.toml)
 build==1.2.1
@@ -30,6 +32,10 @@ identify==2.6.0
     # via pre-commit
 iniconfig==2.0.0
     # via pytest
+markdown-it-py==3.0.0
+    # via rich
+mdurl==0.1.2
+    # via markdown-it-py
 nodeenv==1.9.1
     # via pre-commit
 numpy==1.26.4
@@ -51,13 +57,17 @@ packaging==24.1
 pandas==2.2.2
     # via xarray
 platformdirs==4.2.2
-    # via virtualenv
+    # via
+    #   katcbf_vlbi_resample (pyproject.toml)
+    #   virtualenv
 pluggy==1.5.0
     # via pytest
 pre-commit==3.7.1
     # via katcbf_vlbi_resample (pyproject.toml)
 pyerfa==2.0.1.4
     # via astropy
+pygments==2.18.0
+    # via rich
 pyproject-hooks==1.1.0
     # via build
 pytest==8.3.1
@@ -70,6 +80,8 @@ pyyaml==6.0.1
     # via
     #   astropy
     #   pre-commit
+rich==13.9.4
+    # via katcbf_vlbi_resample (pyproject.toml)
 scipy==1.14.0
     # via katcbf_vlbi_resample (pyproject.toml)
 six==1.16.0

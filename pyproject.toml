@@ -12,11 +12,14 @@ description = "Proof-of-concept of resampling tied-array-channelised-voltages fo
 requires-python = ">=3.11"
 dependencies = [
     "astropy",
+    "atomicwrites",
     "baseband",
     "cupy",
     "h5py",
     # cupy 13 doesn't fully support numpy 2.0 e.g. https://github.com/cupy/cupy/issues/8393
     "numpy<2.0",
+    "platformdirs",
+    "rich",
     "scipy",
     "xarray",
 ]

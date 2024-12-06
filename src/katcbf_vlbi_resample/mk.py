@@ -4,21 +4,30 @@
 
 import argparse
 import csv
+import dataclasses
+import hashlib
+import json
+import os
+import pathlib
 import warnings
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, BinaryIO, Self
 
 import baseband.base.encoding
 import h5py
 import katsdptelstate
 import numpy as np
+import platformdirs
 import xarray as xr
 from astropy.time import Time, TimeDelta
+from atomicwrites import atomic_write
 from baseband.helpers.sequentialfile import FileNameSequencer
+from rich.console import Console
+from rich.progress import Progress
 
 from . import cupy_bridge, hdf5_reader, power, rechunk, resample, vdif_writer
 from .parameters import ResampleParameters, StreamParameters
-from .stream import Stream
+from .stream import ChunkwiseStream, Stream
 from .utils import fraction_to_time_delta
 
 
@@ -104,12 +113,28 @@ def parse_args(threads: list[dict[str, str]]) -> argparse.Namespace:
 
 @dataclass
 class TelescopeStateParameters:
-    """Parameters inferred from katsdptelstate."""
+    """Parameters inferred from katsdptelstate.
+
+    Note: the class members must be compatible with JSON serialisation for
+    caching purposes.
+    """
 
     adc_sample_rate: float
     bandwidth: float
     center_freq: float
-    sync_time: Time
+    sync_time: float
+
+    def to_file(self, path: pathlib.Path) -> None:
+        """Serialise to file (atomically)."""
+        with atomic_write(path, overwrite=True) as fh:
+            json.dump(dataclasses.asdict(self), fh)
+
+    @classmethod
+    def from_file(cls, path: os.PathLike) -> Self:
+        """Deserialize a file written with :meth:`to_file`."""
+        with open(path, "r") as fh:
+            data = json.load(fh)
+        return cls(**data)
 
 
 def telescope_state_parameters(telstate: katsdptelstate.TelescopeState, instrument: str) -> TelescopeStateParameters:
@@ -120,8 +145,45 @@ def telescope_state_parameters(telstate: katsdptelstate.TelescopeState, instrume
         adc_sample_rate=ns["adc_sample_rate"],
         bandwidth=ns["bandwidth"],
         center_freq=ns["center_freq"],
-        sync_time=Time(ns["sync_time"], scale="utc", format="unix"),
+        sync_time=ns["sync_time"],
     )
+
+
+def _ts_parameters_from_file(fh: str | os.PathLike | BinaryIO, instrument: str) -> TelescopeStateParameters:
+    """Implement :func:`telescope_state_parameters_from_file` without the caching."""
+    telstate = katsdptelstate.TelescopeState()
+    telstate.load_from_file(fh)
+    return telescope_state_parameters(telstate, instrument)
+
+
+def telescope_state_parameters_from_file(filename: str | os.PathLike, instrument: str) -> TelescopeStateParameters:
+    """Extract useful parameters from the telescope state.
+
+    This uses a cache indexed by the raw content of the file.
+    """
+    hash_version = 1  # Update when TelescopeStateParameters changes
+    params = None
+    with open(filename, "rb") as fh:
+        h = hashlib.file_digest(fh, "sha256")
+        fh.seek(0)  # In case we need to pass it to telstate to load
+        h.update(instrument.encode())
+        h.update(str(hash_version).encode())
+        key = h.hexdigest()
+        cache_dir = pathlib.Path(platformdirs.user_cache_dir("katcbf_vlbi_resample", "SARAO"))
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            cache_file = cache_dir / f"{key}.json"
+            try:
+                return TelescopeStateParameters.from_file(cache_file)
+            except FileNotFoundError:
+                pass
+            params = _ts_parameters_from_file(fh, instrument)
+            params.to_file(cache_file)
+        except OSError as exc:
+            warnings.warn(f"Could not access telescope state cache ({exc}). Loading from original.")
+            if params is None:
+                params = _ts_parameters_from_file(fh, instrument)
+    return params
 
 
 def _frac_seconds(time: Time) -> float:
@@ -164,13 +226,40 @@ class RecordPower(power.RecordPower):
         self._writer.writerow(values)
 
 
+class ProgressStream(ChunkwiseStream[xr.DataArray, xr.DataArray]):
+    """Stream that shows a progress bar on the console.
+
+    To facilitate setting up the streams prior to putting up the progress bar,
+    the progress bar is registered later by calling :meth:`set_progress`.
+    """
+
+    def __init__(self, input_data: Stream[xr.DataArray]) -> None:
+        super().__init__(input_data)
+        self._progress: Progress | None = None
+        self._task_id = 0
+
+    def set_progress(self, progress: Progress, task_id: int) -> None:
+        """Register the progress bar that will be updated.
+
+        The task must have a total that equals the total number of time
+        samples across all chunks.
+        """
+        self._progress = progress
+        self._task_id = task_id
+
+    def _transform(self, chunk: xr.DataArray) -> xr.DataArray:
+        if self._progress is not None:
+            self._progress.update(self._task_id, advance=chunk.sizes["time"])
+        return chunk
+
+
 def main() -> None:  # noqa: D103
+    console = Console()
     threads = [{"sideband": sideband, "pol": pol} for sideband in ["lsb", "usb"] for pol in ["pol0", "pol1"]]
     args = parse_args(threads)
 
-    telstate = katsdptelstate.TelescopeState()
-    telstate.load_from_file(args.telstate)
-    telstate_params = telescope_state_parameters(telstate, args.instrument)
+    with console.status("Loading telescope state parameters..."):
+        telstate_params = telescope_state_parameters_from_file(args.telstate, args.instrument)
 
     input_params = StreamParameters(bandwidth=telstate_params.bandwidth, center_freq=telstate_params.center_freq)
     output_params = StreamParameters(bandwidth=args.bandwidth, center_freq=args.frequency)
@@ -180,19 +269,21 @@ def main() -> None:  # noqa: D103
     # rdcc_nbytes sets the chunk cache size. MK HDF5 files tend to have 32MB chunks
     # while the default cache size is much smaller than that, so we need to increase
     # it to actually be able to use the chunk cache.
-    it: Stream[xr.DataArray] = hdf5_reader.HDF5Reader(
+    reader = hdf5_reader.HDF5Reader(
         {
             f"pol{i}": h5py.File(input_file, "r", rdcc_nbytes=128 * 1024 * 1024)
             for i, input_file in enumerate(args.input)
         },
         adc_sample_rate=telstate_params.adc_sample_rate,
-        sync_time=telstate_params.sync_time,
+        sync_time=Time(telstate_params.sync_time, scale="utc", format="unix"),
         start_time=args.start,
         duration=args.duration,
         is_cupy=is_cupy,
     )
+    n_spectra = reader.stop_spectrum - reader.start_spectrum
+    progress_it = ProgressStream(reader)
     # Convert back to time domain
-    it = resample.IFFT(it)
+    it: Stream[xr.DataArray] = resample.IFFT(progress_it)
     # Get more accurate start time, now that we can do so with per-sample accuracy
     if args.start is not None:
         it = resample.ClipTime(it, start=args.start)
@@ -219,16 +310,18 @@ def main() -> None:  # noqa: D103
     frameset_it = vdif_writer.VDIFFormatter(it, threads, station=args.station, samples_per_frame=args.samples_per_frame)
 
     # The above just sets up an iterator. Now use it to write to file.
-    print("Ready to start")
     fns = iter(FileNameSequencer(args.output))
     fh: baseband.vdif.VDIFFileWriter | None = None
     try:
-        for frameset in frameset_it:
-            if fh is None or fh.tell() + frameset.nbytes > args.file_size:
-                if fh is not None:
-                    fh.close()
-                fh = baseband.vdif.open(next(fns), "wb")
-            frameset.tofile(fh)
+        with Progress() as progress:
+            task_id = progress.add_task("Processing...", total=n_spectra)
+            progress_it.set_progress(progress, task_id)
+            for frameset in frameset_it:
+                if fh is None or fh.tell() + frameset.nbytes > args.file_size:
+                    if fh is not None:
+                        fh.close()
+                    fh = baseband.vdif.open(next(fns), "wb")
+                frameset.tofile(fh)
     finally:
         if fh is not None:
             fh.close()

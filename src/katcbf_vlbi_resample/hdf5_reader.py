@@ -139,6 +139,23 @@ class HDF5Reader:
         for f in self._inputs:
             f.offset = -f.first_ts_adc // step_ts_adc
 
+    @property
+    def start_spectrum(self) -> int:
+        """Index of first spectrum that will be returned.
+
+        The reference point is the `time_base`. This is thus the first
+        `time_bias` that will appear.
+        """
+        return self._start_ts_adc // self._step_ts_adc
+
+    @property
+    def stop_spectrum(self) -> int:
+        """Index past the last spectrum that will be returned.
+
+        See :attr:`start_spectrum`.
+        """
+        return self._stop_ts_adc // self._step_ts_adc
+
     def __iter__(self) -> Iterator[xr.DataArray]:
         chunk_spectra = self._inputs[0].bf_raw.chunks[1]
         chunk_adc = self._step_ts_adc * chunk_spectra
