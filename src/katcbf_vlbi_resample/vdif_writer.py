@@ -2,12 +2,14 @@
 
 """Encode data to VDIF frames."""
 
+from fractions import Fraction
 from typing import Any, Final, Iterator
 
 import astropy.units as u
 import cupy as cp
 import numpy as np
 import xarray as xr
+from astropy.time import TimeDelta
 from baseband.base.encoding import TWO_BIT_1_SIGMA
 from baseband.vdif import VDIFFrame, VDIFFrameSet, VDIFHeader, VDIFPayload
 
@@ -51,7 +53,10 @@ class VDIFEncode2Bit:
     unchannelised data is supported.
 
     The input need not have any particular alignment. The output is aligned
-    to the VDIF frame length.
+    to the VDIF frame length. This also changes the `time_base` and introduces
+    up to half a sample of delay (positive or negative) to align to the VDIF
+    sample clock. The amount of the delay depends only on the incoming
+    `time_base` and `time_scale`.
     """
 
     SAMPLES_PER_WORD: Final = 16
@@ -67,17 +72,15 @@ class VDIFEncode2Bit:
 
         self._input_it = iter(input_data)
 
-        # The first sample of each frame must satisfy
-        # index % samples_per_frame = phase, where we determine phase here
-        # so that the timestamp error is <=0.5 samples.
-
-        # Get fractions of a second until the next second boundary.
-        frac = -input_data.time_base.utc.ymdhms.second % 1
-        frac_samples = frac / input_data.time_scale
-        self._phase = round(frac_samples) % samples_per_frame
+        # Shift the time_base back to the last whole second. Note that astropy
+        # times are only accurate to around 15ps, but we're likely introducing
+        # larger errors in the rounding of _shift_samples below.
+        shift = input_data.time_base.utc.ymdhms.second % 1
+        #: Amount to add to incoming time_bias
+        self._shift_samples = round(Fraction(shift) / input_data.time_scale)
 
         self.samples_per_frame = samples_per_frame
-        self.time_base = input_data.time_base
+        self.time_base = input_data.time_base - TimeDelta(shift, format="sec", scale="tai")
         self.time_scale = input_data.time_scale * self.SAMPLES_PER_WORD
         self.channels = None
         self.is_cupy = input_data.is_cupy
@@ -86,9 +89,10 @@ class VDIFEncode2Bit:
         samples_per_frame = self.samples_per_frame
         buffer = None
         for in_data in self._input_it:
+            in_data.attrs["time_bias"] += self._shift_samples
             if buffer is None:
                 # Discard leading partial frame.
-                buffer = time_align(in_data, samples_per_frame, self._phase)
+                buffer = time_align(in_data, samples_per_frame, 0)
                 if buffer is None:
                     continue  # Don't have enough data to reach the frame boundary
             else:
@@ -114,8 +118,8 @@ class VDIFEncode2Bit:
 class VDIFFormatter:
     """Encode data to VDIF frames.
 
-    The data must have already been quantised to words using
-    :class:`VDIFEncode2Bit` or similar.
+    The data must have already been quantised to words and aligned to frames
+    using :class:`VDIFEncode2Bit` or similar.
 
     Multiple VDIF threads are supported, provided that they are uniform. The
     `threads` argument must contain one element per desired thread, in the
