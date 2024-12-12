@@ -11,12 +11,12 @@ import cupy as cp
 import numpy as np
 import pytest
 import xarray as xr
-from astropy.time import Time
+from astropy.time import Time, TimeDelta
 from baseband.base.encoding import OPTIMAL_2BIT_HIGH
 from baseband.vdif.payload import encode_2bit
 
 from katcbf_vlbi_resample import vdif_writer
-from katcbf_vlbi_resample.utils import concat_time
+from katcbf_vlbi_resample.utils import concat_time, fraction_to_time_delta
 
 from . import SimpleStream
 
@@ -69,15 +69,18 @@ class TestVDIFEncode2Bit:
     def test_success(self, xp, orig: SimpleStream[xr.DataArray], input_data: xr.DataArray) -> None:
         """Test normal usage."""
         enc = vdif_writer.VDIFEncode2Bit(orig, 160)
-        assert enc.time_base == orig.time_base
         assert enc.time_scale == orig.time_scale * vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
         assert enc.is_cupy == orig.is_cupy
-        # VDIFEncode2Bit should be aligning things to frame boundaries. The
-        # time_base is already on a frame boundary, so frame boundaries occur
-        # when time_bias is a multiple of the frame size.
         chunks = list(enc)
         out_data = concat_time(chunks)
-        assert out_data.attrs["time_bias"] == 320 // vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
+
+        # The original time_base is on a frame boundary, so frame boundaries
+        # occur when the sample index is a multiple of samples_per_frame. So
+        # after discarding a partial frame, the output should start at sample
+        # index 320 on the original clock.
+        expected_start = orig.time_base + fraction_to_time_delta(320 * orig.time_scale)
+        actual_start = enc.time_base + fraction_to_time_delta(out_data.attrs["time_bias"] * enc.time_scale)
+        assert abs(actual_start - expected_start) <= TimeDelta(1e-10, format="sec")
         assert out_data.sizes["time"] == 480 // vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
         used_input_data = input_data.isel(time=xp.s_[23:503])
         xp.testing.assert_array_equal(out_data.data, vdif_writer._encode_2bit_words(used_input_data.data))

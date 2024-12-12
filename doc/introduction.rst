@@ -85,10 +85,7 @@ the script:
 
 - Power normalisation is done independently on each chunk, whereas the
   notebook uses a sliding window to smooth the changes.
-- The power measured during normalisation is not recorded.
-- There is no support for correcting timestamps for system delays. In
-  particular, the timestamps are based solely on the (coarse) sync epoch,
-  rather than the precise sync epoch, and there is no support to correct for
-  KTT-UTC.
+- The user is entirely responsible for computing timestamp corrections to
+  apply.
 - There is no support for conversion to a circular polarisation reference
   frame.

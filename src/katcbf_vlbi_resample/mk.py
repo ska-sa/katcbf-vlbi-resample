@@ -13,6 +13,7 @@ import warnings
 from dataclasses import dataclass
 from typing import Any, BinaryIO, Self
 
+import astropy.units as u
 import baseband.base.encoding
 import h5py
 import katsdptelstate
@@ -45,6 +46,12 @@ def parse_args(threads: list[dict[str, str]]) -> argparse.Namespace:
     input_group.add_argument("--duration", metavar="SECONDS", help="Amount of data to read [to end of files]")
     input_group.add_argument(
         "--instrument", default="narrow1", help="MK instrument whose data is captured [%(default)s]"
+    )
+    input_group.add_argument(
+        "--time-correction",
+        type=u.Quantity,
+        default=u.Quantity(0.0, unit=u.s),
+        help="Quantity to add to sync time to get precise sync time [%(default)s]",
     )
 
     output_group = parser.add_argument_group("Output options")
@@ -107,6 +114,8 @@ def parse_args(threads: list[dict[str, str]]) -> argparse.Namespace:
         )
         for value, thread in zip(values, threads):
             args.normalise.loc[thread] = value
+    if u.get_physical_type(args.time_correction) != "time":
+        parser.error("--time-correction must specify units of time e.g. 2us")
 
     return args
 
@@ -275,7 +284,7 @@ def main() -> None:  # noqa: D103
             for i, input_file in enumerate(args.input)
         },
         adc_sample_rate=telstate_params.adc_sample_rate,
-        sync_time=Time(telstate_params.sync_time, scale="utc", format="unix"),
+        sync_time=Time(telstate_params.sync_time, scale="utc", format="unix") + args.time_correction,
         start_time=args.start,
         duration=args.duration,
         is_cupy=is_cupy,
