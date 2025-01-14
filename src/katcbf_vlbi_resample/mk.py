@@ -1,4 +1,4 @@
-# Copyright (c) 2024, National Research Foundation (SARAO)
+# Copyright (c) 2024-2025, National Research Foundation (SARAO)
 
 """Main script for resampling MeerKAT HDF5 beamformer files."""
 
