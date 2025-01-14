@@ -5,7 +5,6 @@
 from fractions import Fraction
 from typing import Any, Final, Iterator
 
-import astropy.units as u
 import cupy as cp
 import numpy as np
 import xarray as xr
@@ -14,7 +13,7 @@ from baseband.base.encoding import TWO_BIT_1_SIGMA
 from baseband.vdif import VDIFFrame, VDIFFrameSet, VDIFHeader, VDIFPayload
 
 from .stream import Stream
-from .utils import concat_time, fraction_to_time_delta, isel_time, time_align
+from .utils import concat_time, isel_time, time_align
 
 
 @cp.fuse
@@ -119,7 +118,8 @@ class VDIFFormatter:
     """Encode data to VDIF frames.
 
     The data must have already been quantised to words and aligned to frames
-    using :class:`VDIFEncode2Bit` or similar.
+    using :class:`VDIFEncode2Bit` or similar. The time_base must be on a second
+    boundary.
 
     Multiple VDIF threads are supported, provided that they are uniform. The
     `threads` argument must contain one element per desired thread, in the
@@ -147,6 +147,7 @@ class VDIFFormatter:
             nchan=1,
             station=station,
             samples_per_frame=samples_per_frame,
+            ref_time=input_data.time_base,
             edv=0,
         )
         self._threads = threads
@@ -155,6 +156,11 @@ class VDIFFormatter:
         if frame_rate.denominator != 1:
             raise ValueError("samples_per_frame does not yield an integer frame rate")
         self._frame_rate = int(frame_rate)
+        #: Number of VDIF seconds corresponding to a time_bias of 0
+        base_seconds = (input_data.time_base - self._header.ref_time).sec
+        self._base_seconds = round(base_seconds)
+        if abs(base_seconds - self._base_seconds) > 1e-8:
+            raise ValueError("time_base was not aligned to a second boundary")
 
         self.time_base = input_data.time_base
         self.time_scale = input_data.time_scale
@@ -172,8 +178,11 @@ class VDIFFormatter:
 
     def _frame_set(self, frame_data: xr.DataArray) -> VDIFFrameSet:
         header = self._header.copy()
-        time = self.time_base + fraction_to_time_delta(frame_data.attrs["time_bias"] * self.time_scale)
-        header.set_time(time, frame_rate=self._frame_rate * u.Hz)
+        frame = int(frame_data.attrs["time_bias"] * self._frame_rate * self.time_scale)
+        header.update(
+            seconds=self._base_seconds + frame // self._frame_rate,
+            frame_nr=frame % self._frame_rate,
+        )
 
         frames = [self._frame(i, header, frame_data.sel(thread_idx)) for i, thread_idx in enumerate(self._threads)]
         return VDIFFrameSet(frames, header)
