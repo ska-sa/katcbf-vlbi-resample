@@ -1,4 +1,4 @@
-# Copyright (c) 2024, National Research Foundation (SARAO)
+# Copyright (c) 2024-2025, National Research Foundation (SARAO)
 
 """Main script for resampling MeerKAT HDF5 beamformer files."""
 
@@ -58,7 +58,7 @@ def parse_args(threads: list[dict[str, str]]) -> argparse.Namespace:
     output_group.add_argument("--bandwidth", type=float, required=True, metavar="HZ", help="Output bandwidth")
     output_group.add_argument("--frequency", type=float, required=True, metavar="HZ", help="Output centre frequency")
     output_group.add_argument(
-        "--samples-per-frame", type=int, default=1000000, metavar="SAMPLES", help="Samples per VDIF frame [%(default)s]"
+        "--samples-per-frame", type=int, default=20000, metavar="SAMPLES", help="Samples per VDIF frame [%(default)s]"
     )
     output_group.add_argument("--station", default="me", metavar="ID", help="VDIF station ID [%(default)s]")
     output_group.add_argument(

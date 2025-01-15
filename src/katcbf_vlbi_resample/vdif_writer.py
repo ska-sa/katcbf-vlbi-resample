@@ -1,11 +1,10 @@
-# Copyright (c) 2024, National Research Foundation (SARAO)
+# Copyright (c) 2024-2025, National Research Foundation (SARAO)
 
 """Encode data to VDIF frames."""
 
 from fractions import Fraction
 from typing import Any, Final, Iterator
 
-import astropy.units as u
 import cupy as cp
 import numpy as np
 import xarray as xr
@@ -14,7 +13,7 @@ from baseband.base.encoding import TWO_BIT_1_SIGMA
 from baseband.vdif import VDIFFrame, VDIFFrameSet, VDIFHeader, VDIFPayload
 
 from .stream import Stream
-from .utils import concat_time, fraction_to_time_delta, isel_time, time_align
+from .utils import concat_time, isel_time, time_align
 
 
 @cp.fuse
@@ -119,7 +118,8 @@ class VDIFFormatter:
     """Encode data to VDIF frames.
 
     The data must have already been quantised to words and aligned to frames
-    using :class:`VDIFEncode2Bit` or similar.
+    using :class:`VDIFEncode2Bit` or similar. The time_base must be on a second
+    boundary.
 
     Multiple VDIF threads are supported, provided that they are uniform. The
     `threads` argument must contain one element per desired thread, in the
@@ -147,6 +147,7 @@ class VDIFFormatter:
             nchan=1,
             station=station,
             samples_per_frame=samples_per_frame,
+            ref_time=input_data.time_base,
             edv=0,
         )
         self._threads = threads
@@ -155,35 +156,47 @@ class VDIFFormatter:
         if frame_rate.denominator != 1:
             raise ValueError("samples_per_frame does not yield an integer frame rate")
         self._frame_rate = int(frame_rate)
+        #: Number of VDIF seconds corresponding to a time_bias of 0
+        base_seconds = (input_data.time_base - self._header.ref_time).sec
+        self._base_seconds = round(base_seconds)
+        if abs(base_seconds - self._base_seconds) > 1e-8:
+            raise ValueError("time_base was not aligned to a second boundary")
 
         self.time_base = input_data.time_base
         self.time_scale = input_data.time_scale
         self.channels = None
         self.is_cupy = False
 
-    def _frame(self, thread_id: int, header: VDIFHeader, frame_data: xr.DataArray) -> VDIFFrame:
-        assert frame_data.dims == ("time",)
+    def _frame(self, thread_id: int, header: VDIFHeader, frame_data: np.ndarray) -> VDIFFrame:
         header = header.copy()
         header.update(thread_id=thread_id)
         return VDIFFrame(
             header,
-            VDIFPayload(frame_data.to_numpy(), header),
+            VDIFPayload(frame_data, header),
         )
 
-    def _frame_set(self, frame_data: xr.DataArray) -> VDIFFrameSet:
+    def _frame_set(self, frame: int, frame_data: list[np.ndarray]) -> VDIFFrameSet:
         header = self._header.copy()
-        time = self.time_base + fraction_to_time_delta(frame_data.attrs["time_bias"] * self.time_scale)
-        header.set_time(time, frame_rate=self._frame_rate * u.Hz)
+        header.update(
+            seconds=self._base_seconds + frame // self._frame_rate,
+            frame_nr=frame % self._frame_rate,
+        )
 
-        frames = [self._frame(i, header, frame_data.sel(thread_idx)) for i, thread_idx in enumerate(self._threads)]
+        frames = [self._frame(i, header, thread) for i, thread in enumerate(frame_data)]
         return VDIFFrameSet(frames, header)
 
     def __iter__(self) -> Iterator[VDIFFrameSet]:
         words_per_frame = self._header.samples_per_frame // VDIFEncode2Bit.SAMPLES_PER_WORD
         for buffer in self._input_it:
             n_frames = buffer.sizes["time"] // words_per_frame
+            # xarray's overheads are too high to use it on a per-frame basis.
+            # Turn the buffer into a plain ol' numpy array (thread × time).
+            raw_data = [buffer.sel(thread_idx).to_numpy() for thread_idx in self._threads]
+            assert all(data.ndim == 1 for data in raw_data)
+            start_frame = int(buffer[0].attrs["time_bias"] * self._frame_rate * self.time_scale)
             for i in range(n_frames):
                 word_start = i * words_per_frame
                 word_stop = (i + 1) * words_per_frame
-                frame_data = isel_time(buffer, np.s_[word_start:word_stop])
-                yield self._frame_set(frame_data)
+                time_idx = np.s_[word_start:word_stop]
+                frame_data = [data[time_idx] for data in raw_data]
+                yield self._frame_set(start_frame + i, frame_data)
