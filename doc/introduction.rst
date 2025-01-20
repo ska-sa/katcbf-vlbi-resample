@@ -86,6 +86,7 @@ The :program:`mk_vlbi_resample` script performs the following steps:
 - The time-domain data is clipped to the selected start time.
 - A mixer and a bandpass filter with a rational resampling factor are used to
   reduce the bandwidth and adjust the centre frequency.
+- If requested, the polarisation basis is changed.
 - The signal is split into positive and negative frequencies, which become
   the upper and lower side-bands, with only the real component retained.
 - The power is normalised. The data is chunked in time and the values within

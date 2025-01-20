@@ -11,6 +11,10 @@ import math
 import re
 
 import numpy as np
+import xarray as xr
+
+from .stream import ChunkwiseStream, Stream
+from .utils import as_cupy
 
 # Specify each polarisation in a linear x/y basis.
 # Refer to Hamaker and Bregman Paper III for the sign conventions.
@@ -80,3 +84,35 @@ def parse_spec(spec: str) -> np.ndarray:
     in_pols = _parse_half_spec(parts[0])
     out_pols = _parse_half_spec(parts[1])
     return np.linalg.inv(out_pols) @ in_pols
+
+
+class ConvertPolarisation(ChunkwiseStream[xr.DataArray, xr.DataArray]):
+    """Convert polarisation basis of a stream.
+
+    Parameters
+    ----------
+    input_data
+        Input data stream. Each chunk must contain an axis called `pol` with
+        labels `pol0` and `pol1`, and must not contain an axis called
+        `in_pol`.
+    matrix
+        Jones matrix to convert from input to output polarisation basis.
+    """
+
+    def __init__(self, input_data: Stream[xr.DataArray], matrix: np.ndarray) -> None:
+        super().__init__(input_data)
+        self._matrix = xr.DataArray(
+            matrix.astype(np.complex64),
+            dims=("pol", "in_pol"),
+            coords={
+                "pol": ["pol0", "pol1"],
+                "in_pol": ["pol0", "pol1"],
+            },
+        )
+        if self.is_cupy:
+            self._matrix = as_cupy(self._matrix, blocking=True)
+
+    def _transform(self, chunk: xr.DataArray) -> xr.DataArray:
+        out = self._matrix.dot(chunk.rename({"pol": "in_pol"}), dim="in_pol")
+        out.attrs = chunk.attrs
+        return out

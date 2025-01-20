@@ -306,6 +306,9 @@ def main() -> None:  # noqa: D103
     it = resample.Resample(input_params, output_params, resample_params, it)
     # Rechunk to seconds
     it = rechunk_seconds(it)
+    # Change polarisation basis if requested
+    if args.polarisation is not None:
+        it = polarisation.ConvertPolarisation(it, args.polarisation)
     # Measure the power level, for both normalisation and optionally recording
     it_rms: Stream[xr.Dataset] = power.MeasurePower(it)
     if args.record_power is not None:
