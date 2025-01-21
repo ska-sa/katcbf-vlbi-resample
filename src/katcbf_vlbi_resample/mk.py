@@ -302,13 +302,13 @@ def main() -> None:  # noqa: D103
     # Get more accurate start time, now that we can do so with per-sample accuracy
     if args.start is not None:
         it = resample.ClipTime(it, start=args.start)
+    # Change polarisation basis if requested
+    if args.polarisation is not None:
+        it = polarisation.ConvertPolarisation(it, args.polarisation)
     # Do the main resampling work
     it = resample.Resample(input_params, output_params, resample_params, it)
     # Rechunk to seconds
     it = rechunk_seconds(it)
-    # Change polarisation basis if requested
-    if args.polarisation is not None:
-        it = polarisation.ConvertPolarisation(it, args.polarisation)
     # Measure the power level, for both normalisation and optionally recording
     it_rms: Stream[xr.Dataset] = power.MeasurePower(it)
     if args.record_power is not None:
