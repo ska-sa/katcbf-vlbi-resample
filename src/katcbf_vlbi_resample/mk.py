@@ -26,7 +26,7 @@ from baseband.helpers.sequentialfile import FileNameSequencer
 from rich.console import Console
 from rich.progress import Progress
 
-from . import cupy_bridge, hdf5_reader, power, rechunk, resample, vdif_writer
+from . import cupy_bridge, hdf5_reader, polarisation, power, rechunk, resample, vdif_writer
 from .parameters import ResampleParameters, StreamParameters
 from .stream import ChunkwiseStream, Stream
 from .utils import fraction_to_time_delta
@@ -69,6 +69,7 @@ def parse_args(threads: list[dict[str, str]]) -> argparse.Namespace:
     )
 
     proc_group = parser.add_argument_group("Processing options")
+    proc_group.add_argument("--polarisation", type=str, metavar="A,B:C,D", help="Polarisation conversion (see manual)")
     proc_group.add_argument(
         "--fir-taps", type=int, required=True, metavar="TAPS", help="Number of taps in rational filter"
     )
@@ -116,6 +117,11 @@ def parse_args(threads: list[dict[str, str]]) -> argparse.Namespace:
             args.normalise.loc[thread] = value
     if u.get_physical_type(args.time_correction) != "time":
         parser.error("--time-correction must specify units of time e.g. 2us")
+    if args.polarisation is not None:
+        try:
+            args.polarisation = polarisation.parse_spec(args.polarisation)
+        except ValueError as exc:
+            parser.error(f"Invalid --polarisation: {exc}")
 
     return args
 
@@ -300,6 +306,9 @@ def main() -> None:  # noqa: D103
     it = resample.Resample(input_params, output_params, resample_params, it)
     # Rechunk to seconds
     it = rechunk_seconds(it)
+    # Change polarisation basis if requested
+    if args.polarisation is not None:
+        it = polarisation.ConvertPolarisation(it, args.polarisation)
     # Measure the power level, for both normalisation and optionally recording
     it_rms: Stream[xr.Dataset] = power.MeasurePower(it)
     if args.record_power is not None:

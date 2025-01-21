@@ -56,6 +56,26 @@ This specifies:
 There are other command-line options. Run ``mk_vlbi_resample --help`` for
 further details.
 
+Polarisation conversion
+-----------------------
+By default, the output polarisations are the same as the inputs, but there is
+support to change the polarisation basis. The description below assumes that
+the polarisations are in a celestial frame (i.e., that parallactic angle
+correction has been done), but if it has not this will simply carry through to
+the output.
+
+The polarisations of the input and output are specified with a command line
+option :samp:`--polarisation={A},{B}:{C},{D}` where A and B are the
+polarisations of the two inputs (in the order given) and C and D are the
+output polarisation (in the order they will be assigned VDIF thread IDs). The
+valid values for A, B, C and D are:
+
+- :samp:`x`, :samp:`y` for linear polarisation (North and East respectively);
+- :samp:`R`, :samp:`L` for circular polarisation; or
+- any of the above with a :samp:`-` prefix to indicate that the values are
+  negated (for example, :samp:`-x` is South), or a :samp:`+` prefix which has
+  no effect.
+
 Operation
 ---------
 The :program:`mk_vlbi_resample` script performs the following steps:
@@ -66,6 +86,7 @@ The :program:`mk_vlbi_resample` script performs the following steps:
 - The time-domain data is clipped to the selected start time.
 - A mixer and a bandpass filter with a rational resampling factor are used to
   reduce the bandwidth and adjust the centre frequency.
+- If requested, the polarisation basis is changed.
 - The signal is split into positive and negative frequencies, which become
   the upper and lower side-bands, with only the real component retained.
 - The power is normalised. The data is chunked in time and the values within
