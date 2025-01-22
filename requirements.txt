@@ -6,11 +6,11 @@
 #
 alabaster==1.0.0
     # via sphinx
-astropy==6.1.1
+astropy==7.0.0
     # via
     #   baseband
     #   katcbf_vlbi_resample (pyproject.toml)
-astropy-iers-data==0.2024.7.15.0.31.42
+astropy-iers-data==0.2025.1.20.0.32.27
     # via astropy
 atomicwrites==1.4.1
     # via katcbf_vlbi_resample (pyproject.toml)
@@ -18,7 +18,7 @@ babel==2.16.0
     # via sphinx
 baseband==4.2.0
     # via katcbf_vlbi_resample (pyproject.toml)
-build==1.2.1
+build==1.2.2.post1
     # via katcbf_vlbi_resample (pyproject.toml)
 certifi==2024.12.14
     # via requests
@@ -28,23 +28,23 @@ charset-normalizer==3.4.1
     # via requests
 coverage==7.6.10
     # via pytest-cov
-cupy==13.2.0
+cupy==13.3.0
     # via katcbf_vlbi_resample (pyproject.toml)
-distlib==0.3.8
+distlib==0.3.9
     # via virtualenv
 docutils==0.21.2
     # via
     #   sphinx
     #   sphinx-rtd-theme
-fastrlock==0.8.2
+fastrlock==0.8.3
     # via cupy
-filelock==3.15.4
+filelock==3.17.0
     # via virtualenv
-h5py==3.11.0
+h5py==3.12.1
     # via katcbf_vlbi_resample (pyproject.toml)
 hiredis==3.1.0
     # via katsdptelstate
-identify==2.6.0
+identify==2.6.6
     # via pre-commit
 idna==3.10
     # via requests
@@ -66,7 +66,7 @@ msgpack==1.1.0
     # via katsdptelstate
 nodeenv==1.9.1
     # via pre-commit
-numpy==1.26.4
+numpy==2.2.2
     # via
     #   astropy
     #   cupy
@@ -77,32 +77,32 @@ numpy==1.26.4
     #   pyerfa
     #   scipy
     #   xarray
-packaging==24.1
+packaging==24.2
     # via
     #   astropy
     #   build
     #   pytest
     #   sphinx
     #   xarray
-pandas==2.2.2
+pandas==2.2.3
     # via xarray
-platformdirs==4.2.2
+platformdirs==4.3.6
     # via
     #   katcbf_vlbi_resample (pyproject.toml)
     #   virtualenv
 pluggy==1.5.0
     # via pytest
-pre-commit==3.7.1
+pre-commit==4.1.0
     # via katcbf_vlbi_resample (pyproject.toml)
-pyerfa==2.0.1.4
+pyerfa==2.0.1.5
     # via astropy
-pygments==2.18.0
+pygments==2.19.1
     # via
     #   rich
     #   sphinx
-pyproject-hooks==1.1.0
+pyproject-hooks==1.2.0
     # via build
-pytest==8.3.1
+pytest==8.3.4
     # via
     #   katcbf_vlbi_resample (pyproject.toml)
     #   pytest-cov
@@ -113,9 +113,9 @@ pytest-custom-exit-code==0.3.0
     # via katcbf_vlbi_resample (pyproject.toml)
 python-dateutil==2.9.0.post0
     # via pandas
-pytz==2024.1
+pytz==2024.2
     # via pandas
-pyyaml==6.0.1
+pyyaml==6.0.2
     # via
     #   astropy
     #   pre-commit
@@ -125,9 +125,9 @@ requests==2.32.3
     # via sphinx
 rich==13.9.4
     # via katcbf_vlbi_resample (pyproject.toml)
-scipy==1.14.0
+scipy==1.15.1
     # via katcbf_vlbi_resample (pyproject.toml)
-six==1.16.0
+six==1.17.0
     # via
     #   katsdptelstate
     #   python-dateutil
@@ -154,11 +154,11 @@ sphinxcontrib-qthelp==2.0.0
     # via sphinx
 sphinxcontrib-serializinghtml==2.0.0
     # via sphinx
-tzdata==2024.1
+tzdata==2025.1
     # via pandas
 urllib3==2.3.0
     # via requests
-virtualenv==20.26.3
+virtualenv==20.29.1
     # via pre-commit
-xarray==2024.11.0
+xarray==2025.1.1
     # via katcbf_vlbi_resample (pyproject.toml)

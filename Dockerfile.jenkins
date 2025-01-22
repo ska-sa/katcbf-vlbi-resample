@@ -9,6 +9,7 @@ FROM nvidia/cuda:12.5.1-base-ubuntu24.04
 # git is needed for setuptools-scm
 # make is needed for sphinx build
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    cuda-cudart-dev-12-5 \
     cuda-nvrtc-12-5 \
     git \
     libcublas-12-5 \

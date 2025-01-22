@@ -98,8 +98,7 @@ class Rechunk:
             boundary = (chunk_start - remainder) // samples_per_chunk * samples_per_chunk + remainder
             if buffer is None:
                 shape = list(input_chunk.data.shape)
-                # See https://github.com/pydata/xarray/issues/9822
-                shape[input_chunk.get_axis_num("time")] = samples_per_chunk  # type: ignore
+                shape[input_chunk.get_axis_num("time")] = samples_per_chunk
                 buffer = xr.DataArray(
                     xp.zeros(tuple(shape), input_chunk.dtype),
                     dims=input_chunk.dims,
