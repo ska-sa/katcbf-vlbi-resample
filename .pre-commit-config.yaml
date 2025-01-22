@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v5.0.0
     hooks:
       - id: check-merge-conflict
       - id: check-shebang-scripts-are-executable
@@ -11,7 +11,7 @@ repos:
       - id: no-commit-to-branch # without arguments, master/main will be protected.
       - id: trailing-whitespace
   - repo: https://github.com/psf/black
-    rev: 24.4.2
+    rev: 24.10.0
     hooks:
       - id: black
   - repo: https://github.com/pycqa/isort
@@ -19,11 +19,11 @@ repos:
     hooks:
       - id: isort
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.5.2
+    rev: v0.9.2
     hooks:
       - id: ruff
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.10.1
+    rev: v1.14.1
     hooks:
       - id: mypy
         # Passing filenames to mypy can do odd things.
@@ -32,12 +32,12 @@ repos:
         # The pre-commit hook passes some options, but we set options in pyproject.toml.
         args: []
         additional_dependencies:
-          - astropy==6.1.1
+          - astropy==7.0.0
           - baseband==4.2.0
-          - h5py==3.11.0
-          - numpy==2.0.0
-          - scipy==1.14.0
-          - xarray==2024.11.0
+          - h5py==3.12.1
+          - numpy==2.2.2
+          - scipy==1.15.1
+          - xarray==2025.1.1
   - repo: https://github.com/jazzband/pip-tools
     rev: 7.4.1
     hooks:

@@ -9,16 +9,15 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "katcbf_vlbi_resample"
 description = "Proof-of-concept of resampling tied-array-channelised-voltages for VLBI"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "astropy",
     "atomicwrites",
     "baseband",
-    "cupy",
+    "cupy>=13.3.0",  # Older versions have issues with numpy 2
     "h5py",
     "katsdptelstate",
-    # cupy 13 doesn't fully support numpy 2.0 e.g. https://github.com/cupy/cupy/issues/8393
-    "numpy<2.0",
+    "numpy",
     "platformdirs",
     "rich",
     "scipy",
