@@ -27,8 +27,17 @@ dependencies = [
 dynamic = ["version"]
 
 [project.optional-dependencies]
-dev = ["pre-commit", "pytest", "build"]
-doc = ["sphinx", "sphinx-rtd-theme"]
+dev = [
+    "build",
+    "pre-commit",
+    "pytest",
+    "pytest-cov",
+    "pytest-custom-exit-code",
+]
+doc = [
+    "sphinx",
+    "sphinx-rtd-theme",
+]
 
 [project.scripts]
 "mk_vlbi_resample" = "katcbf_vlbi_resample.mk:main"
