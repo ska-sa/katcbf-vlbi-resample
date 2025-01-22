@@ -1,0 +1,22 @@
+# Copyright (c) 2025, National Research Foundation (SARAO)
+#
+# This builds a Docker image that is used specifically for testing with
+# the Jenkinsfile in this directory. It is not intended for production use,
+# and contains only the portions that need to be run as root.
+
+FROM nvidia/cuda:12.5.1-base-ubuntu24.04
+
+# git is needed for setuptools-scm
+# make is needed for sphinx build
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    cuda-nvrtc-12-5 \
+    git \
+    libcublas-12-5 \
+    libcufft-12-5 \
+    make \
+    python3 \
+    python3-venv
+
+# Jenkins doesn't seem to support updating PATH at pipeline scope
+# (https://issues.jenkins.io/browse/JENKINS-50299), so we do it here.
+ENV PATH="/tmp/venv/bin:$PATH"

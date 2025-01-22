@@ -16,6 +16,7 @@ dependencies = [
     "baseband",
     "cupy",
     "h5py",
+    "katsdptelstate",
     # cupy 13 doesn't fully support numpy 2.0 e.g. https://github.com/cupy/cupy/issues/8393
     "numpy<2.0",
     "platformdirs",
@@ -26,8 +27,17 @@ dependencies = [
 dynamic = ["version"]
 
 [project.optional-dependencies]
-dev = ["pre-commit", "pytest", "build"]
-doc = ["sphinx", "sphinx-rtd-theme"]
+dev = [
+    "build",
+    "pre-commit",
+    "pytest",
+    "pytest-cov",
+    "pytest-custom-exit-code",
+]
+doc = [
+    "sphinx",
+    "sphinx-rtd-theme",
+]
 
 [project.scripts]
 "mk_vlbi_resample" = "katcbf_vlbi_resample.mk:main"

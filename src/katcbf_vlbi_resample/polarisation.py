@@ -29,7 +29,7 @@ _POLARISATIONS = {
 
 
 def _parse_pol(spec: str) -> np.ndarray:
-    """Parse a single polarisation in the :opt:`--polarisation` command-line option.
+    """Parse a single polarisation in the :option:`--polarisation` command-line option.
 
     The return value is a vector giving the coordinates of a signal of
     this polarisation in linear x, y coordinates.
@@ -48,7 +48,7 @@ def _parse_pol(spec: str) -> np.ndarray:
 
 
 def _parse_half_spec(spec: str) -> np.ndarray:
-    """Parse one side of the :opt:`!--polarisation` command-line option.
+    """Parse one side of the :option:`!--polarisation` command-line option.
 
     The return value is a Jones matrix which converts from the given
     coordinate system to a linear coordinate system.
@@ -68,7 +68,7 @@ def _parse_half_spec(spec: str) -> np.ndarray:
 
 
 def parse_spec(spec: str) -> np.ndarray:
-    """Parse the :opt:`!--polarisation` command-line option.
+    """Parse the :option:`!--polarisation` command-line option.
 
     The return value is a Jones matrix which is multiplied by
     the electric field vector to get the output vector.
