@@ -2,9 +2,9 @@
 
 """Utilities for unit tests."""
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from fractions import Fraction
-from typing import Callable, Generic, TypeVar
+from typing import Generic, TypeVar
 
 import numpy as np
 import xarray as xr

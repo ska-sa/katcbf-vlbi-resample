@@ -147,7 +147,7 @@ class TelescopeStateParameters:
     @classmethod
     def from_file(cls, path: os.PathLike) -> Self:
         """Deserialize a file written with :meth:`to_file`."""
-        with open(path, "r") as fh:
+        with open(path) as fh:
             data = json.load(fh)
         return cls(**data)
 
