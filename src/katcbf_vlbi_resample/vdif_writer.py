@@ -2,8 +2,9 @@
 
 """Encode data to VDIF frames."""
 
+from collections.abc import Iterator
 from fractions import Fraction
-from typing import Any, Final, Iterator
+from typing import Any, Final
 
 import cupy as cp
 import numpy as np

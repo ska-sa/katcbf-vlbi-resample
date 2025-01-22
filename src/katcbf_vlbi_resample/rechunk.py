@@ -2,7 +2,8 @@
 
 """Split and combine chunks to align in time."""
 
-from typing import Final, Iterator
+from collections.abc import Iterator
+from typing import Final
 
 import cupy as cp
 import numpy as np
