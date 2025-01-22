@@ -20,12 +20,7 @@ import cupyx.scipy.signal  # noqa: E402
 
 
 def _wrap_cupyx_upfirdn(h: cp.ndarray, x: cp.ndarray, *args, **kwargs):
-    # Work around a few bugs:
-    # https://github.com/cupy/cupy/issues/8448
-    # https://github.com/cupy/cupy/issues/8449
-    if kwargs.get("mode") == "constant":
-        del kwargs["mode"]
-
+    # Work around https://github.com/cupy/cupy/issues/8448
     if x.ndim == 1:
         return cupyx.scipy.signal.upfirdn(h, x, *args, **kwargs)
     elif x.ndim == 2:
