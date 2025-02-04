@@ -16,6 +16,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     libc6-dev \
     libcublas-12-5 \
     libcufft-12-5 \
+    libpython3-dev \
     make \
     python3 \
     python3-venv
