@@ -69,6 +69,7 @@ class TestConvertPolarisation:
                     [1 + 2j, 3 + 5j, 8 - 11j, 1.5, -2.5],
                     [-7j, 1 + 9.5j, 10j, 0.0, 1.0],
                 ],
+                np.complex64,
             ),
             dims=("pol", "time"),
             coords={"pol": ["pol0", "pol1"]},
@@ -77,7 +78,7 @@ class TestConvertPolarisation:
         orig = SimpleStream.factory(time_base, time_scale, orig_data, chunk_size=3)
         # This isn't a realistic polarisation basis matrix, but it makes it
         # easy to compute expected values.
-        matrix = np.array([[0.0, 2.0], [1.0, -1.0]])
+        matrix = np.array([[0.0, 2.0], [1.0, -1.0]], np.complex64)
         out = ConvertPolarisation(orig, matrix)
 
         assert out.is_cupy == orig.is_cupy
@@ -92,6 +93,7 @@ class TestConvertPolarisation:
                     [-14j, 2 + 19j, 20j, 0.0, 2.0],
                     [1 + 9j, 2 - 4.5j, 8 - 21j, 1.5, -3.5],
                 ],
+                np.complex64,
             ),
             dims=("pol", "time"),
             coords={"pol": ["pol0", "pol1"]},
