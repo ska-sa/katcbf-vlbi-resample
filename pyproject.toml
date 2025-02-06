@@ -16,7 +16,7 @@ dependencies = [
     "baseband",
     "cupy>=13.3.0",  # Older versions have issues with numpy 2
     "h5py",
-    "katsdptelstate",
+    "katsdptelstate[rdb]",
     "numpy",
     "platformdirs",
     "rich",

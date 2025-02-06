@@ -113,14 +113,20 @@ pytest-custom-exit-code==0.3.0
     # via katcbf_vlbi_resample (pyproject.toml)
 python-dateutil==2.9.0.post0
     # via pandas
+python-lzf==0.2.6
+    # via katsdptelstate
 pytz==2024.2
     # via pandas
 pyyaml==6.0.2
     # via
     #   astropy
     #   pre-commit
-redis==5.2.1
+rdbtools==0.1.15
     # via katsdptelstate
+redis==5.2.1
+    # via
+    #   katsdptelstate
+    #   rdbtools
 requests==2.32.3
     # via sphinx
 rich==13.9.4
