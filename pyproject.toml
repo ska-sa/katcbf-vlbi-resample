@@ -28,7 +28,9 @@ dependencies = [
     "astropy",
     "atomicwrites",
     "baseband",
-    "cupy>=13.3.0",  # Older versions have issues with numpy 2
+    # Older versions have issues with numpy 2
+    # 13.5.1 suffers from https://github.com/cupy/cupy/issues/9271
+    "cupy>=13.3.0,!=13.5.1",
     "h5py",
     "katsdptelstate[rdb]",
     "numpy",
