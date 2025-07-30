@@ -11,19 +11,19 @@ repos:
       - id: no-commit-to-branch # without arguments, master/main will be protected.
       - id: trailing-whitespace
   - repo: https://github.com/psf/black
-    rev: 24.10.0
+    rev: 25.1.0
     hooks:
       - id: black
   - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
+    rev: 6.0.1
     hooks:
       - id: isort
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.9.2
+    rev: v0.12.7
     hooks:
       - id: ruff
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.14.1
+    rev: v1.17.0
     hooks:
       - id: mypy
         # Passing filenames to mypy can do odd things.
@@ -32,12 +32,12 @@ repos:
         # The pre-commit hook passes some options, but we set options in pyproject.toml.
         args: []
         additional_dependencies:
-          - astropy==7.0.0
-          - baseband==4.2.0
-          - h5py==3.12.1
-          - numpy==2.2.2
-          - scipy==1.15.1
-          - xarray==2025.1.1
+          - astropy==7.1.0
+          - baseband==4.3.0
+          - h5py==3.14.0
+          - numpy==2.3.2
+          - scipy==1.16.1
+          - xarray==2025.7.1
   - repo: https://github.com/astral-sh/uv-pre-commit
     rev: 0.8.3
     hooks:
