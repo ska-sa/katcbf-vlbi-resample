@@ -63,9 +63,6 @@ doc = [
 [project.scripts]
 "mk_vlbi_resample" = "katcbf_vlbi_resample.mk:main"
 
-[tool.black]
-line-length = 120
-
 [tool.isort]
 profile = "black"
 line_length = 120
