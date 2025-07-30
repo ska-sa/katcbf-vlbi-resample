@@ -43,6 +43,10 @@ license = "BSD-3-Clause"
 license-files = ["LICENSE"]
 dynamic = ["version"]
 
+[project.urls]
+Homepage = "https://github.com/ska-sa/katcbf-vlbi-resample"
+Documentation = "https://katcbf-vlbi-resample.readthedocs.io"
+
 [project.optional-dependencies]
 dev = [
     "build",
