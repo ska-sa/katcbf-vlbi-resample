@@ -10,10 +10,6 @@ repos:
         args: [--fix=lf]
       - id: no-commit-to-branch # without arguments, master/main will be protected.
       - id: trailing-whitespace
-  - repo: https://github.com/pycqa/isort
-    rev: 6.0.1
-    hooks:
-      - id: isort
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.12.7
     hooks:

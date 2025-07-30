@@ -63,14 +63,16 @@ doc = [
 [project.scripts]
 "mk_vlbi_resample" = "katcbf_vlbi_resample.mk:main"
 
-[tool.isort]
-profile = "black"
-line_length = 120
-
 [tool.ruff]
 line-length = 120
 [tool.ruff.lint]
-extend-select = ["D", "W"]
+select = [
+    "E", "W",  # pycodestyle
+    "F",  # pyflakes
+    "I",  # isort
+    "D",  # pydocstyle
+    "RUF100",  # Unnecessary noqa directives
+]
 extend-ignore = ["D105", "D107"]  # magic methods
 exclude = ["doc/conf.py"]
 [tool.ruff.lint.pydocstyle]
