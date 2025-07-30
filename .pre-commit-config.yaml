@@ -38,10 +38,14 @@ repos:
           - numpy==2.2.2
           - scipy==1.15.1
           - xarray==2025.1.1
-  - repo: https://github.com/jazzband/pip-tools
-    rev: 7.4.1
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.8.3
     hooks:
       - id: pip-compile
-        language_version: python3.12
-        args: ["--output-file=requirements.txt", "--extra=dev", "--extra=doc", "--strip-extras", "pyproject.toml"]
+        args:
+          - "--output-file=requirements.txt"
+          - "--extra=dev"
+          - "--extra=doc"
+          - "--python-version=3.12"
+          - "pyproject.toml"
         files: '^(pyproject\.toml|requirements\.txt)$'
