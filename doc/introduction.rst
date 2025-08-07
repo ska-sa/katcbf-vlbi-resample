@@ -15,7 +15,7 @@ Installation
 Run ``pip install -r requirements.txt .``
 
 This will install `cupy`_, which will take a while and might fail if you don't
-already have CUDA installed. At least Python 3.11 is required.
+already have CUDA installed. At least Python 3.12 is required.
 
 .. _cupy: https://docs.cupy.dev/
 
