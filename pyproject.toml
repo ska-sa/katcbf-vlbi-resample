@@ -1,4 +1,18 @@
-# Copyright (c) 2024, National Research Foundation (SARAO)
+################################################################################
+# Copyright (c) 2024-2025, National Research Foundation (SARAO)
+#
+# Licensed under the BSD 3-Clause License (the "License"); you may not use
+# this file except in compliance with the License. You may obtain a copy
+# of the License at
+#
+#   https://opensource.org/licenses/BSD-3-Clause
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
 
 [build-system]
 requires = ["setuptools", "setuptools-scm"]
@@ -14,7 +28,9 @@ dependencies = [
     "astropy",
     "atomicwrites",
     "baseband",
-    "cupy>=13.3.0",  # Older versions have issues with numpy 2
+    # Older versions have issues with numpy 2
+    # 13.5.1 suffers from https://github.com/cupy/cupy/issues/9271
+    "cupy>=13.3.0,!=13.5.1",
     "h5py",
     "katsdptelstate[rdb]",
     "numpy",
@@ -23,7 +39,13 @@ dependencies = [
     "scipy",
     "xarray",
 ]
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/ska-sa/katcbf-vlbi-resample"
+Documentation = "https://katcbf-vlbi-resample.readthedocs.io"
 
 [project.optional-dependencies]
 dev = [
@@ -41,23 +63,22 @@ doc = [
 [project.scripts]
 "mk_vlbi_resample" = "katcbf_vlbi_resample.mk:main"
 
-[tool.black]
-line-length = 120
-
-[tool.isort]
-profile = "black"
-line_length = 120
-
 [tool.ruff]
 line-length = 120
 [tool.ruff.lint]
-extend-select = ["D", "W"]
+select = [
+    "E", "W",  # pycodestyle
+    "F",  # pyflakes
+    "I",  # isort
+    "D",  # pydocstyle
+    "RUF100",  # Unnecessary noqa directives
+]
 extend-ignore = ["D105", "D107"]  # magic methods
 exclude = ["doc/conf.py"]
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 files = ["src", "test"]
 ignore_missing_imports = true

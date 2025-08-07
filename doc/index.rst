@@ -12,6 +12,7 @@ Welcome to katcbf-vlbi-resample's documentation!
 
    introduction
    design
+   changelog
    API reference <katcbf_vlbi_resample>
 
 Indices and tables
