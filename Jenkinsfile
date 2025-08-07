@@ -59,7 +59,7 @@ pipeline {
           steps {
             sh "pytest -v -ra --junitxml=result.xml --cov=test --cov=katcbf_vlbi_resample --cov-report=xml --cov-branch --suppress-tests-failed-exit-code"
             junit 'result.xml'
-            cobertura coberturaReportFile: 'coverage.xml'
+            recordCoverage sourceCodeEncoding: 'UTF-8', tools: [[parser: 'COBERTURA', pattern: 'coverage.xml']]
           }
         }
 
