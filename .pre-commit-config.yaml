@@ -39,6 +39,7 @@ repos:
           - "--output-file=requirements.txt"
           - "--extra=dev"
           - "--extra=doc"
+          - "--extra=cuda12x"
           - "--python-version=3.12"
           - "pyproject.toml"
         files: '^(pyproject\.toml|requirements\.txt)$'

@@ -28,12 +28,10 @@ dependencies = [
     "astropy",
     "atomicwrites",
     "baseband",
-    # Older versions have issues with numpy 2
-    # 13.5.1 suffers from https://github.com/cupy/cupy/issues/9271
-    "cupy>=13.3.0,!=13.5.1",
     "h5py",
     "katsdptelstate[rdb]",
     "numpy",
+    "packaging",
     "platformdirs",
     "rich",
     "scipy",
@@ -59,6 +57,9 @@ dev = [
 doc = [
     "sphinx",
     "sphinx-rtd-theme",
+]
+cuda12x = [
+    "cupy-cuda12x"
 ]
 
 [project.scripts]
