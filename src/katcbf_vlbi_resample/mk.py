@@ -283,7 +283,7 @@ class ProgressStream(ChunkwiseStream[xr.DataArray, xr.DataArray]):
         return chunk
 
 
-async def main() -> None:  # noqa: D103
+async def async_main() -> None:  # noqa: D103
     console = Console()
     threads = [{"sideband": sideband, "pol": pol} for sideband in ["lsb", "usb"] for pol in ["pol0", "pol1"]]
     args = parse_args(threads)
@@ -362,5 +362,9 @@ async def main() -> None:  # noqa: D103
             power_fh.close()
 
 
+def main():  # noqa: D103
+    asyncio.run(async_main())
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
