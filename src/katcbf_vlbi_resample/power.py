@@ -16,6 +16,7 @@
 
 """Normalise power level prior to quantisation."""
 
+import asyncio
 from abc import abstractmethod
 from collections import deque
 from dataclasses import dataclass
@@ -120,7 +121,8 @@ class RecordPower(ChunkwiseStream[xr.Dataset, xr.Dataset]):
             entry = _RmsHistoryEntry(data.attrs["time_bias"], data.sizes["time"], rms_np, event)
             self._rms_history.append(entry)
             if len(self._rms_history) > self._MAX_HISTORY:
-                self._rms_history[0].event.synchronize()
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, self._rms_history[0].event.synchronize)
             while self._rms_history and self._rms_history[0].event.done:
                 entry = self._rms_history.popleft()
                 self.record_rms(entry.start, entry.length, entry.rms)
@@ -134,9 +136,10 @@ class RecordPower(ChunkwiseStream[xr.Dataset, xr.Dataset]):
             return await super().__anext__()
         except StopAsyncIteration:
             # Flush out _rms_history
+            loop = asyncio.get_running_loop()
             while self._rms_history:
                 entry = self._rms_history.popleft()
-                entry.event.synchronize()
+                await loop.run_in_executor(None, entry.event.synchronize())
                 self.record_rms(entry.start, entry.length, entry.rms)
             raise
 

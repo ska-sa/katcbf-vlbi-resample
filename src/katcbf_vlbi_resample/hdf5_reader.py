@@ -16,6 +16,7 @@
 
 """Load data from MeerKAT beamformer HDF5 files."""
 
+import asyncio
 from collections import deque
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -93,10 +94,11 @@ class _PinnedBuffer:
         self._data = cupyx.empty_pinned(shape, dtype)
         self._event: cp.cuda.Event | None = None
 
-    def get(self) -> np.ndarray:
+    async def get(self) -> np.ndarray:
         """Get the array, waiting for any recorded event."""
         if self._event is not None:
-            self._event.synchronize()
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, self._event.synchronize)
         return self._data
 
     def put(self, event: cp.cuda.Event) -> None:
@@ -182,7 +184,7 @@ class HDF5Reader:
             if self.is_cupy:
                 xp = cp
                 transfer_buf = transfer_bufs.popleft()
-                store = transfer_buf.get()
+                store = await transfer_buf.get()
             else:
                 xp = np
                 store = np.empty(transfer_shape, dtype)
