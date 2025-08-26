@@ -65,7 +65,7 @@ class MeasurePower(ChunkwiseStream[xr.Dataset, xr.DataArray]):
     the RMS voltages without a time axis).
     """
 
-    def _transform(self, chunk: xr.DataArray) -> xr.Dataset:
+    async def _transform(self, chunk: xr.DataArray) -> xr.Dataset:
         assert chunk.dtype.kind == "f", "only real floating-point data is supported"
         rms = xr.apply_ufunc(_rms, chunk, input_core_dims=[["time"]], output_dtypes=[chunk.dtype])
         rms.name = "rms"
@@ -108,7 +108,7 @@ class RecordPower(ChunkwiseStream[xr.Dataset, xr.Dataset]):
         """
         pass  # pragma: nocover
 
-    def _transform(self, chunk: xr.Dataset) -> xr.Dataset:
+    async def _transform(self, chunk: xr.Dataset) -> xr.Dataset:
         # Duplicate since the downstream owns the chunk once it's yielded
         rms = chunk["rms"].copy()
         data = chunk["data"]
@@ -129,10 +129,10 @@ class RecordPower(ChunkwiseStream[xr.Dataset, xr.Dataset]):
 
         return chunk
 
-    def __next__(self) -> xr.Dataset:
+    async def __anext__(self) -> xr.Dataset:
         try:
-            return super().__next__()
-        except StopIteration:
+            return await super().__anext__()
+        except StopAsyncIteration:
             # Flush out _rms_history
             while self._rms_history:
                 entry = self._rms_history.popleft()
@@ -182,7 +182,7 @@ class NormalisePower(ChunkwiseStream[xr.DataArray, xr.Dataset]):
         if not isinstance(power, xr.DataArray) and power not in {"auto", "first"}:
             raise ValueError("power must be 'auto', 'first' or a DataArray")
 
-    def _transform(self, chunk: xr.Dataset) -> xr.DataArray:
+    async def _transform(self, chunk: xr.Dataset) -> xr.DataArray:
         if self._mul is not None:
             mul = self._mul
         else:

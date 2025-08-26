@@ -16,7 +16,7 @@
 
 """Utilities for unit tests."""
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterable
 from fractions import Fraction
 
 import numpy as np
@@ -47,8 +47,9 @@ class SimpleStream[T]:
         self.is_cupy = is_cupy
         self.chunks = chunks
 
-    def __iter__(self) -> Iterator[T]:
-        return iter(self.chunks)
+    async def __aiter__(self) -> AsyncIterator[T]:
+        for chunk in self.chunks:
+            yield chunk
 
     @staticmethod
     def factory(

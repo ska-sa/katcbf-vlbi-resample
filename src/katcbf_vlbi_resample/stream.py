@@ -17,7 +17,7 @@
 """Abstract definition of a sample stream."""
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from fractions import Fraction
 from typing import Protocol
 
@@ -46,7 +46,7 @@ class Stream[T](Protocol):
     def is_cupy(self) -> bool:  # noqa: D102
         raise NotImplementedError  # pragma: nocover
 
-    def __iter__(self) -> Iterator[T]:
+    def __aiter__(self) -> AsyncIterator[T]:
         raise NotImplementedError  # pragma: nocover
 
 
@@ -65,15 +65,15 @@ class ChunkwiseStream[O, I](ABC):
         self.time_scale = input_data.time_scale
         self.channels = input_data.channels
         self.is_cupy = input_data.is_cupy
-        self._input_it = iter(input_data)
+        self._input_it = aiter(input_data)
 
     @abstractmethod
-    def _transform(self, chunk: I) -> O:
+    async def _transform(self, chunk: I) -> O:
         """Compute an output chunk from an input chunk."""
         raise NotImplementedError  # pragma: nocover
 
-    def __iter__(self) -> Iterator[O]:
+    def __aiter__(self) -> AsyncIterator[O]:
         return self
 
-    def __next__(self) -> O:
-        return self._transform(next(self._input_it))
+    async def __anext__(self) -> O:
+        return await self._transform(await anext(self._input_it))

@@ -104,8 +104,11 @@ pyproject-hooks==1.2.0
 pytest==8.4.1
     # via
     #   katcbf-vlbi-resample (pyproject.toml)
+    #   pytest-asyncio
     #   pytest-cov
     #   pytest-custom-exit-code
+pytest-asyncio==1.1.0
+    # via katcbf-vlbi-resample (pyproject.toml)
 pytest-cov==6.2.1
     # via katcbf-vlbi-resample (pyproject.toml)
 pytest-custom-exit-code==0.3.0

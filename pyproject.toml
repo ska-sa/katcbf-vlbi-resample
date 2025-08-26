@@ -52,6 +52,7 @@ dev = [
     "build",
     "pre-commit",
     "pytest",
+    "pytest-asyncio",
     "pytest-cov",
     "pytest-custom-exit-code",
 ]
@@ -83,3 +84,7 @@ convention = "numpy"
 python_version = "3.12"
 files = ["src", "test"]
 ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

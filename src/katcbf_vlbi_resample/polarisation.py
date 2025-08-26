@@ -142,7 +142,7 @@ class ConvertPolarisation(ChunkwiseStream[xr.DataArray, xr.DataArray]):
                 },
             )
 
-    def _transform(self, chunk: xr.DataArray) -> xr.DataArray:
+    async def _transform(self, chunk: xr.DataArray) -> xr.DataArray:
         if self.is_cupy:
             pol0 = chunk.sel({"pol": "pol0"})
             pol1 = chunk.sel({"pol": "pol1"})

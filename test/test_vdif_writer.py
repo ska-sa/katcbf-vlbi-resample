@@ -80,12 +80,12 @@ class TestVDIFEncode2Bit:
         with pytest.raises(ValueError, match="samples_per_frame does not yield an integer frame rate"):
             vdif_writer.VDIFEncode2Bit(orig, 160032)
 
-    def test_success(self, xp, orig: SimpleStream[xr.DataArray], input_data: xr.DataArray) -> None:
+    async def test_success(self, xp, orig: SimpleStream[xr.DataArray], input_data: xr.DataArray) -> None:
         """Test normal usage."""
         enc = vdif_writer.VDIFEncode2Bit(orig, 160)
         assert enc.time_scale == orig.time_scale * vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
         assert enc.is_cupy == orig.is_cupy
-        chunks = list(enc)
+        chunks = [chunk async for chunk in enc]
         out_data = concat_time(chunks)
 
         # The original time_base is on a frame boundary, so frame boundaries
@@ -123,7 +123,7 @@ class TestVDIFFormatter:
         with pytest.raises(ValueError, match="samples_per_frame does not yield an integer frame rate"):
             vdif_writer.VDIFFormatter(orig, [{}], station="me", samples_per_frame=160032)
 
-    def test_success(self, xp, time_base: Time, time_scale: Fraction) -> None:
+    async def test_success(self, xp, time_base: Time, time_scale: Fraction) -> None:
         """Test normal usage."""
         rng = np.random.default_rng(seed=1)
         # We test separately that VDIFEncoder2Bit clips data to whole frames,
@@ -152,7 +152,7 @@ class TestVDIFFormatter:
 
         # Write the data to an in-memory file
         fh = io.BytesIO()
-        for frameset in fmt:
+        async for frameset in fmt:
             frameset.tofile(fh)
 
         # Read it back and compare to the original data

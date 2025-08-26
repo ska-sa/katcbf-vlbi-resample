@@ -46,7 +46,7 @@ class StoreRms(RecordPower):
 class TestMeasurePower:
     """Test :class:`.MeasurePower`."""
 
-    def test(self, xp, time_base: Time, time_scale: Fraction) -> None:
+    async def test(self, xp, time_base: Time, time_scale: Fraction) -> None:
         """Test :class:`.NormalisePower`."""
         rng = xp.random.default_rng(seed=1)
         data = xr.DataArray(
@@ -63,7 +63,7 @@ class TestMeasurePower:
         assert norm.time_base == time_base
         assert norm.time_scale == time_scale
         assert norm.channels is None
-        chunks = list(norm)
+        chunks = [chunk async for chunk in norm]
         out = concat_time([chunk["data"] for chunk in chunks])
         out_rms = xr.concat([chunk["rms"] for chunk in chunks], dim="time").T
         xr.testing.assert_identical(out, data)
@@ -136,10 +136,10 @@ def orig(
 class TestRecordPower:
     """Test :class:`.RecordPower`."""
 
-    def test(self, xp, orig_rms: xr.DataArray, orig: SimpleStream[xr.Dataset]) -> None:  # noqa: D102
+    async def test(self, xp, orig_rms: xr.DataArray, orig: SimpleStream[xr.Dataset]) -> None:  # noqa: D102
         output = []
         recorder = StoreRms(orig)
-        for chunk in recorder:
+        async for chunk in recorder:
             output.append(chunk["rms"])
         output_array = xr.concat(output, dim="chunk")
         orig_rms.name = "rms"
@@ -162,11 +162,11 @@ class TestNormalisePower:
         assert norm.channels == orig.channels
         assert norm.is_cupy == orig.is_cupy
 
-    def test_auto(self, xp, orig: SimpleStream[xr.Dataset]) -> None:
+    async def test_auto(self, xp, orig: SimpleStream[xr.Dataset]) -> None:
         """Test :class:`.NormalisePower` with 'auto' normalisation."""
         norm = NormalisePower(orig, scale=1.5, power="auto")
         self._test_stream_attributes(norm, orig)
-        data = concat_time(list(norm))
+        data = concat_time([chunk async for chunk in norm])
         assert is_cupy(data) == norm.is_cupy
 
         expected = xr.DataArray(
@@ -184,11 +184,11 @@ class TestNormalisePower:
         )
         xr.testing.assert_identical(data, expected)
 
-    def test_first(self, xp, orig: SimpleStream[xr.Dataset]) -> None:
+    async def test_first(self, xp, orig: SimpleStream[xr.Dataset]) -> None:
         """Test :class:`.NormalisePower` with 'first' normalisation."""
         norm = NormalisePower(orig, scale=1.5, power="first")
         self._test_stream_attributes(norm, orig)
-        data = concat_time(list(norm))
+        data = concat_time([chunk async for chunk in norm])
         assert is_cupy(data) == norm.is_cupy
 
         expected = xr.DataArray(
@@ -206,7 +206,7 @@ class TestNormalisePower:
         )
         xr.testing.assert_identical(data, expected)
 
-    def test_fixed(self, xp, orig: SimpleStream[xr.Dataset]) -> None:
+    async def test_fixed(self, xp, orig: SimpleStream[xr.Dataset]) -> None:
         """Test :class:`.NormalisePower` with user-provided normalisation."""
         power = xr.DataArray(
             np.array([9.0, 4.0]),  # Note: np not xp because it's provided by user
@@ -215,7 +215,7 @@ class TestNormalisePower:
         )
         norm = NormalisePower(orig, scale=1.5, power=power)
         self._test_stream_attributes(norm, orig)
-        data = concat_time(list(norm))
+        data = concat_time([chunk async for chunk in norm])
         assert is_cupy(data) == norm.is_cupy
 
         expected = xr.DataArray(

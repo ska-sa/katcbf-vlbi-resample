@@ -17,7 +17,7 @@
 """Load data from MeerKAT beamformer HDF5 files."""
 
 from collections import deque
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import Self
@@ -168,7 +168,7 @@ class HDF5Reader:
         """
         return self._stop_ts_adc // self._step_ts_adc
 
-    def __iter__(self) -> Iterator[xr.DataArray]:
+    async def __aiter__(self) -> AsyncIterator[xr.DataArray]:
         chunk_spectra = self._inputs[0].bf_raw.chunks[1]
         chunk_adc = self._step_ts_adc * chunk_spectra
         transfer_shape = (len(self._inputs), self.channels, chunk_spectra, 2)

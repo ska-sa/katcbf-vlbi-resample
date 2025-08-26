@@ -16,7 +16,7 @@
 
 """Encode data to VDIF frames."""
 
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from fractions import Fraction
 from typing import Any, Final
 
@@ -84,7 +84,7 @@ class VDIFEncode2Bit:
         if (samples_per_frame * input_data.time_scale).numerator != 1:
             raise ValueError("samples_per_frame does not yield an integer frame rate")
 
-        self._input_it = iter(input_data)
+        self._input_it = aiter(input_data)
 
         # Shift the time_base back to the last whole second. Note that astropy
         # times are only accurate to around 15ps, but we're likely introducing
@@ -99,10 +99,10 @@ class VDIFEncode2Bit:
         self.channels = None
         self.is_cupy = input_data.is_cupy
 
-    def __iter__(self) -> Iterator[VDIFFrameSet]:
+    async def __aiter__(self) -> AsyncIterator[VDIFFrameSet]:
         samples_per_frame = self.samples_per_frame
         buffer = None
-        for in_data in self._input_it:
+        async for in_data in self._input_it:
             in_data.attrs["time_bias"] += self._shift_samples
             if buffer is None:
                 # Discard leading partial frame.
@@ -155,7 +155,7 @@ class VDIFFormatter:
             raise ValueError("VDIFFormatter currently only supports unchannelised data")
         if samples_per_frame % (2 * VDIFEncode2Bit.SAMPLES_PER_WORD) != 0:
             raise ValueError(f"samples_per_frame must be a multiple of {2 * VDIFEncode2Bit.SAMPLES_PER_WORD}")
-        self._input_it = iter(input_data)
+        self._input_it = aiter(input_data)
         self._header = VDIFHeader.fromvalues(
             bps=2,
             complex_data=False,
@@ -200,9 +200,9 @@ class VDIFFormatter:
         frames = [self._frame(i, header, thread) for i, thread in enumerate(frame_data)]
         return VDIFFrameSet(frames, header)
 
-    def __iter__(self) -> Iterator[VDIFFrameSet]:
+    async def __aiter__(self) -> AsyncIterator[VDIFFrameSet]:
         words_per_frame = self._header.samples_per_frame // VDIFEncode2Bit.SAMPLES_PER_WORD
-        for buffer in self._input_it:
+        async for buffer in self._input_it:
             n_frames = buffer.sizes["time"] // words_per_frame
             # xarray's overheads are too high to use it on a per-frame basis.
             # Turn the buffer into a plain ol' numpy array (thread × time).
