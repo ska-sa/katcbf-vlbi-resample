@@ -20,7 +20,7 @@ from collections import deque
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import Self, TypeVar
+from typing import Self
 
 import cupy as cp
 import cupyx
@@ -29,10 +29,8 @@ import numpy as np
 import xarray as xr
 from astropy.time import Time, TimeDelta
 
-_T = TypeVar("_T")
 
-
-def _single_value(name: str, values: Sequence[_T]) -> _T:
+def _single_value[T](name: str, values: Sequence[T]) -> T:
     """Check that all values in `values` are the same, and return that value.
 
     Raises

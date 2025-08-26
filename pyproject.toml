@@ -71,6 +71,7 @@ select = [
     "F",  # pyflakes
     "I",  # isort
     "D",  # pydocstyle
+    "U",  # pyupgrade
     "RUF100",  # Unnecessary noqa directives
 ]
 extend-ignore = ["D105", "D107"]  # magic methods
