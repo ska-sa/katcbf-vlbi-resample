@@ -16,7 +16,6 @@
 
 """Load data from MeerKAT beamformer HDF5 files."""
 
-import asyncio
 from collections import deque
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -29,6 +28,8 @@ import h5py
 import numpy as np
 import xarray as xr
 from astropy.time import Time, TimeDelta
+
+from .utils import wait_event
 
 
 def _single_value[T](name: str, values: Sequence[T]) -> T:
@@ -97,8 +98,7 @@ class _PinnedBuffer:
     async def get(self) -> np.ndarray:
         """Get the array, waiting for any recorded event."""
         if self._event is not None:
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, self._event.synchronize)
+            await wait_event(self._event)
         return self._data
 
     def put(self, event: cp.cuda.Event) -> None:

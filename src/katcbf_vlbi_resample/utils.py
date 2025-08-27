@@ -16,6 +16,7 @@
 
 """Miscellaneous utilities."""
 
+import asyncio
 from collections.abc import Sequence
 from fractions import Fraction
 
@@ -91,6 +92,12 @@ def is_cupy(array: xr.DataArray) -> bool:
 def as_cupy(array: xr.DataArray, blocking: bool = False) -> xr.DataArray:
     """Convert `array` to hold a cupy array if necessary."""
     return array.copy(data=cp.asarray(array.data, blocking=blocking))
+
+
+async def wait_event(event: cp.cuda.Event) -> None:
+    """Wait for a CUDA event, using the asyncio event loop."""
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, event.synchronize)
 
 
 def fraction_to_time_delta(secs: Fraction, scale: str = "tai") -> TimeDelta:

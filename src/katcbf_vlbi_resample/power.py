@@ -16,7 +16,6 @@
 
 """Normalise power level prior to quantisation."""
 
-import asyncio
 from abc import abstractmethod
 from collections import deque
 from dataclasses import dataclass
@@ -28,7 +27,7 @@ import numpy as np
 import xarray as xr
 
 from .stream import ChunkwiseStream, Stream
-from .utils import as_cupy
+from .utils import as_cupy, wait_event
 
 
 def _rms(array: np.ndarray | cp.ndarray) -> np.ndarray | cp.ndarray:
@@ -121,8 +120,7 @@ class RecordPower(ChunkwiseStream[xr.Dataset, xr.Dataset]):
             entry = _RmsHistoryEntry(data.attrs["time_bias"], data.sizes["time"], rms_np, event)
             self._rms_history.append(entry)
             if len(self._rms_history) > self._MAX_HISTORY:
-                loop = asyncio.get_running_loop()
-                await loop.run_in_executor(None, self._rms_history[0].event.synchronize)
+                await wait_event(self._rms_history[0].event)
             while self._rms_history and self._rms_history[0].event.done:
                 entry = self._rms_history.popleft()
                 self.record_rms(entry.start, entry.length, entry.rms)
@@ -136,10 +134,9 @@ class RecordPower(ChunkwiseStream[xr.Dataset, xr.Dataset]):
             return await super().__anext__()
         except StopAsyncIteration:
             # Flush out _rms_history
-            loop = asyncio.get_running_loop()
             while self._rms_history:
                 entry = self._rms_history.popleft()
-                await loop.run_in_executor(None, entry.event.synchronize())
+                await wait_event(entry.event)
                 self.record_rms(entry.start, entry.length, entry.rms)
             raise
 
