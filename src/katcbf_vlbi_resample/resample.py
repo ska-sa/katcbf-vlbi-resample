@@ -16,7 +16,7 @@
 
 """Signal processing algorithms."""
 
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from fractions import Fraction
 
 import cupy as cp
@@ -69,20 +69,20 @@ class ClipTime:
         self.time_scale = input_data.time_scale
         self.channels = input_data.channels
         self.is_cupy = input_data.is_cupy
-        self._input_it = iter(input_data)
+        self._input_it = aiter(input_data)
 
-    def __iter__(self) -> Iterator[xr.DataArray]:
+    def __aiter__(self) -> AsyncIterator[xr.DataArray]:
         return self
 
-    def __next__(self) -> xr.DataArray:
+    async def __anext__(self) -> xr.DataArray:
         while True:
-            chunk = next(self._input_it)
+            chunk = await anext(self._input_it)
             chunk_start: int = chunk.attrs["time_bias"]
             chunk_stop = chunk_start + chunk.sizes["time"]
             start = chunk_start if self._start is None else self._start
             stop = chunk_stop if self._stop is None else self._stop
             if chunk_start >= stop:
-                raise StopIteration  # We've gone past `stop`
+                raise StopAsyncIteration  # We've gone past `stop`
             if chunk_stop > start:
                 break  # We've found a chunk which is at least partially kept
 
@@ -105,7 +105,7 @@ class IFFT(ChunkwiseStream[xr.DataArray, xr.DataArray]):
         self.is_cupy = input_data.is_cupy
         self._in_channels = input_data.channels
 
-    def _transform(self, chunk: xr.DataArray) -> xr.DataArray:
+    async def _transform(self, chunk: xr.DataArray) -> xr.DataArray:
         assert chunk.sizes["channel"] == self._in_channels
         # Move middle frequency to position 0
         chunk = chunk.roll(channel=-(self._in_channels // 2))
@@ -281,7 +281,7 @@ class Resample:
         self._time_bias_mod = resample_params.fir_taps // 2 * pow(n, -1, mod=d) % d
         self._hilbert = _hilbert_coeff_win(resample_params.hilbert_taps)
         self._mix_freq = input_params.center_freq - output_params.center_freq
-        self._input_it = iter(input_data)
+        self._input_it = aiter(input_data)
         self._in_time_scale = input_data.time_scale
         self.time_base = input_data.time_base
         self.time_scale = input_data.time_scale / self._ratio
@@ -292,10 +292,10 @@ class Resample:
             self._fir = as_cupy(self._fir, blocking=True)
             self._hilbert = as_cupy(self._hilbert, blocking=True)
 
-    def __iter__(self) -> Iterator[xr.DataArray]:
+    async def __aiter__(self) -> AsyncIterator[xr.DataArray]:
         buffer = None
         n, d = self._ratio.as_integer_ratio()
-        for input_chunk in self._input_it:
+        async for input_chunk in self._input_it:
             if buffer is None:
                 # TODO: could instead pad on the left, then discard invalid
                 # samples, which would avoid discarding good data.

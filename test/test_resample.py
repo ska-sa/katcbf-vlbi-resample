@@ -51,7 +51,7 @@ class TestClipTime:
             (173, 298, 173, 125),  # Stop and stop not aligned to chunks
         ],
     )
-    def test_overlap(
+    async def test_overlap(
         self,
         xp,
         orig: SimpleStream[xr.DataArray],
@@ -64,7 +64,7 @@ class TestClipTime:
         clip = ClipTime(orig, start, stop)
         assert clip.time_base == orig.time_base
         assert clip.time_scale == orig.time_scale
-        chunks = list(clip)
+        chunks = [chunk async for chunk in clip]
         next_time_bias = time_bias
         for chunk in chunks:
             assert chunk.sizes["time"]  # Empty chunks should be skipped
@@ -78,12 +78,12 @@ class TestClipTime:
         "start,stop",
         [(10, 40), (10, 50), (None, 40), (540, 1000), (550, 1000), (540, None)],
     )
-    def test_no_overlap(self, orig: SimpleStream[xr.DataArray], start: int | None, stop: int | None) -> None:
+    async def test_no_overlap(self, orig: SimpleStream[xr.DataArray], start: int | None, stop: int | None) -> None:
         """Test where selected range does not overlap the data."""
         clip = ClipTime(orig, start, stop)
         assert clip.time_base == orig.time_base
         assert clip.time_scale == orig.time_scale
-        chunks = list(clip)
+        chunks = [chunk async for chunk in clip]
         assert not chunks
 
     def test_absolute_time(self, orig: SimpleStream[xr.DataArray]) -> None:
@@ -96,7 +96,7 @@ class TestClipTime:
 class TestIFFT:
     """Test :class:`.IFFT`."""
 
-    def test(self, xp, time_base: Time, time_scale: Fraction) -> None:
+    async def test(self, xp, time_base: Time, time_scale: Fraction) -> None:
         """Test normal usage."""
         rng = xp.random.default_rng(seed=1)
         channels = 32768
@@ -114,7 +114,7 @@ class TestIFFT:
         assert ifft.channels is None
         assert ifft.time_base == stream.time_base
         assert ifft.time_scale == stream.time_scale / channels
-        out = concat_time(list(ifft))
+        out = concat_time([chunk async for chunk in ifft])
         assert out.attrs["time_bias"] == freq_data_xr.attrs["time_bias"] * channels
         xp.testing.assert_allclose(time_data.ravel(), out.data)
 
@@ -160,7 +160,7 @@ class TestResample:
         return 1 / Fraction(input_params.bandwidth)
 
     @pytest.mark.parametrize("chunk_size", [100, 20000])
-    def test_chunk_consistency(
+    async def test_chunk_consistency(
         self,
         xp,
         input_params: StreamParameters,
@@ -182,14 +182,14 @@ class TestResample:
         orig2 = SimpleStream.factory(time_base, time_scale, data, chunk_size)
         resample1 = Resample(input_params, output_params, resample_params, orig1)
         resample2 = Resample(input_params, output_params, resample_params, orig2)
-        out1 = list(resample1)
-        out2 = list(resample2)
+        out1 = [chunk async for chunk in resample1]
+        out2 = [chunk async for chunk in resample2]
         out1c = xr.concat(out1, dim="time")
         out2c = xr.concat(out2, dim="time")
         # TODO: the cupy version seems to need a much higher atol to pass.
         xr.testing.assert_allclose(out1c, out2c, atol=1e-5)
 
-    def test_group_delay(
+    async def test_group_delay(
         self,
         xp,
         input_params: StreamParameters,
@@ -212,7 +212,7 @@ class TestResample:
         )
         orig = SimpleStream.factory(time_base, time_scale, data)
         resample = Resample(input_params, output_params, resample_params, orig)
-        out = list(resample)
+        out = [chunk async for chunk in resample]
         assert len(out) == 1
         for f in freqs:
             res = out[0].sel(freq=f)

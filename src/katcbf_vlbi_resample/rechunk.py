@@ -16,7 +16,7 @@
 
 """Split and combine chunks to align in time."""
 
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from typing import Final
 
 import cupy as cp
@@ -48,7 +48,7 @@ class Rechunk:
     def __init__(
         self, input_data: Stream[xr.DataArray], samples_per_chunk: int, remainder: int = 0, *, partial: bool = False
     ) -> None:
-        self._input_it: Final = iter(input_data)
+        self._input_it: Final = aiter(input_data)
         self.samples_per_chunk: Final = samples_per_chunk
         self.remainder: Final = remainder
         self.partial: Final = partial
@@ -58,11 +58,11 @@ class Rechunk:
         self.is_cupy: Final = input_data.is_cupy
         self.channels: Final = input_data.channels
 
-    def _split_input(self) -> Iterator[xr.DataArray]:
+    async def _split_input(self) -> AsyncIterator[xr.DataArray]:
         """Split input chunks on samples_per_chunk boundaries."""
         samples_per_chunk = self.samples_per_chunk
         remainder = self.remainder
-        for input_chunk in self._input_it:
+        async for input_chunk in self._input_it:
             start: int = input_chunk.attrs["time_bias"]
             stop = start + input_chunk.sizes["time"]
             # boundary > start and aligned to samples_per_chunk
@@ -75,7 +75,7 @@ class Rechunk:
             if last < stop:
                 yield isel_time(input_chunk, np.s_[last - start : stop - start])
 
-    def __iter__(self) -> Iterator[xr.DataArray]:
+    async def __aiter__(self) -> AsyncIterator[xr.DataArray]:
         buffer: xr.DataArray | None = None
         # Copy of buffer.time_bias, for quick access
         buffer_base = -1
@@ -105,7 +105,7 @@ class Rechunk:
             buffer.attrs["time_bias"] = buffer_base  # type: ignore
 
         xp = cp if self.is_cupy else np
-        for input_chunk in self._split_input():
+        async for input_chunk in self._split_input():
             chunk_start = input_chunk.attrs["time_bias"]
             chunk_size = input_chunk.sizes["time"]
             if chunk_size == 0:
@@ -139,6 +139,8 @@ class Rechunk:
                 buffer_stop += chunk_size
                 if buffer_stop == samples_per_chunk:
                     # We've reached the end of a chunk
-                    yield from yield_buffer()
+                    for chunk in yield_buffer():
+                        yield chunk
 
-        yield from yield_buffer()  # Deal with any trailing piece
+        for chunk in yield_buffer():  # Deal with any trailing piece
+            yield chunk

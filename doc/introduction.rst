@@ -14,8 +14,11 @@ Installation
 ------------
 Run ``pip install -r requirements.txt .``
 
-This will install `cupy`_, which will take a while and might fail if you don't
-already have CUDA installed. At least Python 3.12 is required.
+You will additionally need to install `cupy`_, but the process for this
+depends on your CUDA version. For example, if you have CUDA 12.x, you can run
+``pip install cupy-cuda12x`` to get a binary wheel (if available for your
+processor architecture and OS). Refer to the cupy documentation for more
+information.
 
 .. _cupy: https://docs.cupy.dev/
 

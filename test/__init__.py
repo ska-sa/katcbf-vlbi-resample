@@ -16,17 +16,14 @@
 
 """Utilities for unit tests."""
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterable
 from fractions import Fraction
-from typing import Generic, TypeVar
 
 import numpy as np
 import xarray as xr
 from astropy.time import Time
 
 from katcbf_vlbi_resample.utils import is_cupy, isel_time
-
-_T_co = TypeVar("_T_co", covariant=True)
 
 
 def complex_random(gen_real: Callable[[], np.ndarray], /) -> np.ndarray:
@@ -38,11 +35,11 @@ def complex_random(gen_real: Callable[[], np.ndarray], /) -> np.ndarray:
     return gen_real() + 1j * gen_real()
 
 
-class SimpleStream(Generic[_T_co]):
+class SimpleStream[T]:
     """Stream that holds its data in memory."""
 
     def __init__(
-        self, time_base: Time, time_scale: Fraction, channels: int | None, is_cupy: bool, chunks: Iterable[_T_co]
+        self, time_base: Time, time_scale: Fraction, channels: int | None, is_cupy: bool, chunks: Iterable[T]
     ) -> None:
         self.time_base = time_base
         self.time_scale = time_scale
@@ -50,8 +47,9 @@ class SimpleStream(Generic[_T_co]):
         self.is_cupy = is_cupy
         self.chunks = chunks
 
-    def __iter__(self) -> Iterator[_T_co]:
-        return iter(self.chunks)
+    async def __aiter__(self) -> AsyncIterator[T]:
+        for chunk in self.chunks:
+            yield chunk
 
     @staticmethod
     def factory(

@@ -38,10 +38,7 @@ pipeline {
 
     stage('Install') {
       steps {
-        // Use a binary wheel instead of compiling from source, to
-        // speed things up
-        sh "sed 's/^cupy==/cupy-cuda12x==/' requirements.txt > requirements-ci.txt"
-        sh "pip install -r requirements-ci.txt"
+        sh "pip install -r requirements.txt"
         sh "pip install --no-deps -e ."
       }
     }

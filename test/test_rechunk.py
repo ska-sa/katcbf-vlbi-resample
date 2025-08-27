@@ -91,7 +91,7 @@ class TestRechunk:
             ),
         ],
     )
-    def test(
+    async def test(
         self,
         orig: SimpleStream[xr.DataArray],
         orig_data: xr.DataArray,
@@ -107,7 +107,7 @@ class TestRechunk:
         assert stream.channels is None
         assert stream.is_cupy == orig.is_cupy
 
-        chunks = list(stream)
+        chunks = [chunk async for chunk in stream]
         data = concat_time(chunks)
         expected = orig_data
         if not partial:
