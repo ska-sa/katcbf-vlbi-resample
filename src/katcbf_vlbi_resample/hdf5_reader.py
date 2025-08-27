@@ -16,6 +16,7 @@
 
 """Load data from MeerKAT beamformer HDF5 files."""
 
+import asyncio
 from collections import deque
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -29,7 +30,7 @@ import numpy as np
 import xarray as xr
 from astropy.time import Time, TimeDelta
 
-from .utils import wait_event
+from .utils import stream_event
 
 
 def _single_value[T](name: str, values: Sequence[T]) -> T:
@@ -93,15 +94,15 @@ class _PinnedBuffer:
 
     def __init__(self, shape: tuple[int, ...], dtype: np.dtype) -> None:
         self._data = cupyx.empty_pinned(shape, dtype)
-        self._event: cp.cuda.Event | None = None
+        self._event: asyncio.Event | None = None
 
     async def get(self) -> np.ndarray:
         """Get the array, waiting for any recorded event."""
         if self._event is not None:
-            await wait_event(self._event)
+            await self._event.wait()
         return self._data
 
-    def put(self, event: cp.cuda.Event) -> None:
+    def put(self, event: asyncio.Event) -> None:
         """Record that the array is in use for an asynchronous transfer."""
         self._event = event
 
@@ -198,9 +199,7 @@ class HDF5Reader:
             # don't do this earlier because read_direct wants contiguous memory.
             device_store = xp.asarray(store[:, :, : spectrum1 - spectrum0, :])
             if self.is_cupy:
-                event = cp.cuda.Event(disable_timing=True)
-                event.record()
-                transfer_buf.put(event)
+                transfer_buf.put(stream_event())
                 transfer_bufs.append(transfer_buf)
             # Convert Gaussian integers to complex. TODO: nan out missing data
             # Also transpose the time and channel axes. That's not actually

@@ -94,10 +94,13 @@ def as_cupy(array: xr.DataArray, blocking: bool = False) -> xr.DataArray:
     return array.copy(data=cp.asarray(array.data, blocking=blocking))
 
 
-async def wait_event(event: cp.cuda.Event) -> None:
-    """Wait for a CUDA event, using the asyncio event loop."""
+def stream_event(stream: cp.cuda.Stream | None = None) -> asyncio.Event:
+    """Return an Event that is set when work on the current CUDA stream is complete."""
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, event.synchronize)
+    event = asyncio.Event()
+    target_stream = cp.cuda.get_current_stream() if stream is None else stream
+    target_stream.launch_host_func(loop.call_soon_threadsafe, event.set)
+    return event
 
 
 def fraction_to_time_delta(secs: Fraction, scale: str = "tai") -> TimeDelta:

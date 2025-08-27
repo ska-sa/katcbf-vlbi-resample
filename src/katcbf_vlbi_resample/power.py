@@ -16,6 +16,7 @@
 
 """Normalise power level prior to quantisation."""
 
+import asyncio
 from abc import abstractmethod
 from collections import deque
 from dataclasses import dataclass
@@ -27,7 +28,7 @@ import numpy as np
 import xarray as xr
 
 from .stream import ChunkwiseStream, Stream
-from .utils import as_cupy, wait_event
+from .utils import as_cupy, stream_event
 
 
 def _rms(array: np.ndarray | cp.ndarray) -> np.ndarray | cp.ndarray:
@@ -51,7 +52,7 @@ class _RmsHistoryEntry:
     start: int  # First sample index
     length: int  # Number of samples
     rms: xr.DataArray  # Numpy-backed RMS
-    event: cp.cuda.Event  # Event to wait for rms to be valid
+    event: asyncio.Event  # Event to wait for rms to be valid
 
 
 class MeasurePower(ChunkwiseStream[xr.Dataset, xr.DataArray]):
@@ -115,13 +116,12 @@ class RecordPower(ChunkwiseStream[xr.Dataset, xr.Dataset]):
         if isinstance(rms.data, cp.ndarray):
             rms_out = cupyx.empty_like_pinned(rms.data)
             rms_np = rms.copy(data=cp.asnumpy(rms.data, out=rms_out, blocking=False))
-            event = cp.cuda.Event(disable_timing=True)
-            event.record()
+            event = stream_event()
             entry = _RmsHistoryEntry(data.attrs["time_bias"], data.sizes["time"], rms_np, event)
             self._rms_history.append(entry)
             if len(self._rms_history) > self._MAX_HISTORY:
-                await wait_event(self._rms_history[0].event)
-            while self._rms_history and self._rms_history[0].event.done:
+                await self._rms_history[0].event.wait()
+            while self._rms_history and self._rms_history[0].event.is_set():
                 entry = self._rms_history.popleft()
                 self.record_rms(entry.start, entry.length, entry.rms)
         else:
@@ -136,7 +136,7 @@ class RecordPower(ChunkwiseStream[xr.Dataset, xr.Dataset]):
             # Flush out _rms_history
             while self._rms_history:
                 entry = self._rms_history.popleft()
-                await wait_event(entry.event)
+                await entry.event.wait()
                 self.record_rms(entry.start, entry.length, entry.rms)
             raise
 
