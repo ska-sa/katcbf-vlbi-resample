@@ -17,6 +17,7 @@
 """Miscellaneous utilities."""
 
 import asyncio
+import functools
 from collections.abc import Sequence
 from fractions import Fraction
 
@@ -94,13 +95,13 @@ def as_cupy(array: xr.DataArray, blocking: bool = False) -> xr.DataArray:
     return array.copy(data=cp.asarray(array.data, blocking=blocking))
 
 
-def stream_event(stream: cp.cuda.Stream | None = None) -> asyncio.Event:
-    """Return an Event that is set when work on the current CUDA stream is complete."""
+def stream_future[T](value: T, stream: cp.cuda.Stream | None = None) -> asyncio.Future[T]:
+    """Return a Future that is made ready when work on the current CUDA stream is complete."""
     loop = asyncio.get_running_loop()
-    event = asyncio.Event()
+    future = loop.create_future()
     target_stream = cp.cuda.get_current_stream() if stream is None else stream
-    target_stream.launch_host_func(loop.call_soon_threadsafe, event.set)
-    return event
+    target_stream.launch_host_func(loop.call_soon_threadsafe, functools.partial(future.set_result, value))
+    return future
 
 
 def fraction_to_time_delta(secs: Fraction, scale: str = "tai") -> TimeDelta:

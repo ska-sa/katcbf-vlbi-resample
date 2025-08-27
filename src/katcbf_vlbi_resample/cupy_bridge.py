@@ -26,7 +26,7 @@ import packaging.version
 import xarray as xr
 
 from .stream import ChunkwiseStream, Stream
-from .utils import as_cupy, stream_event
+from .utils import as_cupy, stream_future
 
 # We don't list cupy in project requirements because there are multiple
 # packages that could provide it (e.g. cupy-cudaNNx for binary wheels),
@@ -63,21 +63,18 @@ class AsNumpy:
         self.channels = input_data.channels
         self.is_cupy = False
         self._input_it = aiter(input_data)
-        self._queue: deque[tuple[xr.DataArray, asyncio.Event]] = deque()
+        self._queue: deque[asyncio.Future[xr.DataArray]] = deque()
         self._queue_depth = queue_depth
 
     async def _flush(self, max_size: int) -> AsyncIterator[xr.DataArray]:
         while len(self._queue) > max_size:
-            buffer, event = self._queue.popleft()
-            await event.wait()
-            yield buffer
+            yield (await self._queue.popleft())
 
     async def __aiter__(self) -> AsyncIterator[xr.DataArray]:
         async for buffer in self._input_it:
             out = cupyx.empty_like_pinned(buffer.data)
             buffer = buffer.copy(data=cp.asnumpy(buffer.data, out=out, blocking=False))
-            event = stream_event()
-            self._queue.append((buffer, event))
+            self._queue.append(stream_future(buffer))
             async for chunk in self._flush(self._queue_depth):
                 yield chunk
         async for chunk in self._flush(0):

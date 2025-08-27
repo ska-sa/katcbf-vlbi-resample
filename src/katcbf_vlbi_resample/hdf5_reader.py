@@ -30,7 +30,7 @@ import numpy as np
 import xarray as xr
 from astropy.time import Time, TimeDelta
 
-from .utils import stream_event
+from .utils import stream_future
 
 
 def _single_value[T](name: str, values: Sequence[T]) -> T:
@@ -93,18 +93,17 @@ class _PinnedBuffer:
     """Transfer pinned in CUDA pinned memory."""
 
     def __init__(self, shape: tuple[int, ...], dtype: np.dtype) -> None:
-        self._data = cupyx.empty_pinned(shape, dtype)
+        self._data: asyncio.Future[np.ndarray] = asyncio.get_running_loop().create_future()
+        self._data.set_result(cupyx.empty_pinned(shape, dtype))
         self._event: asyncio.Event | None = None
 
     async def get(self) -> np.ndarray:
         """Get the array, waiting for any recorded event."""
-        if self._event is not None:
-            await self._event.wait()
-        return self._data
+        return await self._data
 
-    def put(self, event: asyncio.Event) -> None:
+    def put(self) -> None:
         """Record that the array is in use for an asynchronous transfer."""
-        self._event = event
+        self._data = stream_future(self._data.result())
 
 
 class HDF5Reader:
@@ -199,7 +198,7 @@ class HDF5Reader:
             # don't do this earlier because read_direct wants contiguous memory.
             device_store = xp.asarray(store[:, :, : spectrum1 - spectrum0, :])
             if self.is_cupy:
-                transfer_buf.put(stream_event())
+                transfer_buf.put()
                 transfer_bufs.append(transfer_buf)
             # Convert Gaussian integers to complex. TODO: nan out missing data
             # Also transpose the time and channel axes. That's not actually
