@@ -32,7 +32,7 @@ from .utils import as_cupy, stream_future
 # packages that could provide it (e.g. cupy-cudaNNx for binary wheels),
 # so we check the dependencies at import time.
 _cupy_version = packaging.version.Version(cp.__version__)
-if _cupy_version < packaging.version.Version("13.3"):
+if _cupy_version < packaging.version.Version("13.4"):
     raise ImportError("cupy >= 13.4 is required", name="cupy")
 if _cupy_version == packaging.version.Version("13.5.1"):
     raise ImportError("cupy 13.5.1 is not supported due to a bug", name="cupy")
