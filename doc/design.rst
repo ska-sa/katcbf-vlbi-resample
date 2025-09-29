@@ -3,12 +3,12 @@ Design
 
 Iterators
 ---------
-The stream of sample values is broken up into a chunks, and is presented as a
-Python iterator that yields the chunks one at a time. This serial, ordered
-approach is in contrast to frameworks like Dask_ that allow random and
-parallel access to all the chunks. That model is powerful for offline
-processing, but an iterator-based design more closely models an online
-processing pipeline.
+The stream of sample values is broken up into chunks, and is presented as a
+Python asynchronous iterator that yields the chunks one at a time. This
+serial, ordered approach is in contrast to frameworks like Dask_ that allow
+random and parallel access to all the chunks. That model is powerful for
+offline processing, but an iterator-based design more closely models an
+online processing pipeline.
 
 .. _Dask: https://docs.dask.org/en/stable/
 
@@ -63,6 +63,10 @@ have been done with numpy or scipy. To facilitate testing and the
 or numpy arrays. In some cases the naïve approach of using the same code for
 both backends was found to be slow, and cupy-specific codepaths (using custom
 kernels) was used instead for better performance.
+
+When a Stream yields a chunk stored as a cupy array, it only guarantees that
+the work to compute/transfer it has been scheduled to the current CUDA stream,
+not that the results are complete.
 
 This approach is still sub-optimal, with many unnecessary copies and more
 passes over the memory than necessary. However, it has the benefit of being

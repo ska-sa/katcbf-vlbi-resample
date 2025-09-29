@@ -75,7 +75,7 @@ class TestParseSpec:
 class TestConvertPolarisation:
     """Test :class:`katcbf_vlbi_resample.polarisation.ConvertPolarisation`."""
 
-    def test(self, xp, time_base: Time, time_scale: Fraction) -> None:
+    async def test(self, xp, time_base: Time, time_scale: Fraction) -> None:
         """Test :class:`katcbf_vlbi_resample.polarisation.ConvertPolarisation`."""
         orig_data = xr.DataArray(
             xp.array(
@@ -99,7 +99,7 @@ class TestConvertPolarisation:
         assert out.time_base == orig.time_base
         assert out.time_scale == orig.time_scale
         assert out.channels == orig.channels
-        data = concat_time(list(out))
+        data = concat_time([chunk async for chunk in out])
         assert is_cupy(data) == out.is_cupy
         expected = xr.DataArray(
             xp.array(

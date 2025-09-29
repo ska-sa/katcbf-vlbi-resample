@@ -32,7 +32,7 @@ from . import SimpleStream
 class TestAsCupy:
     """Tests for :class:`katcbf_vlbi_resample.cupy_bridge.AsCupy`."""
 
-    def test(self, time_base: Time, time_scale: Fraction) -> None:
+    async def test(self, time_base: Time, time_scale: Fraction) -> None:
         """Test basic functionality."""
         data = xr.DataArray(np.arange(1000), dims=("time",), attrs={"time_bias": 100})
         orig = SimpleStream.factory(time_base, time_scale, data, 5)
@@ -42,7 +42,7 @@ class TestAsCupy:
         assert stream.channels is None
         assert stream.is_cupy
 
-        chunks = list(stream)
+        chunks = [chunk async for chunk in stream]
         for chunk in chunks:
             assert isinstance(chunk.data, cp.ndarray)
         out = concat_time(chunks)
@@ -52,7 +52,7 @@ class TestAsCupy:
 class TestAsNumpy:
     """Tests for :class:`katcbf_vlbi_resample.cupy_bridge.AsNumpy`."""
 
-    def test(self, time_base: Time, time_scale: Fraction) -> None:
+    async def test(self, time_base: Time, time_scale: Fraction) -> None:
         """Test basic functionality."""
         data = xr.DataArray(cp.arange(1000), dims=("time",), attrs={"time_bias": 100})
         orig = SimpleStream.factory(time_base, time_scale, data, 5)
@@ -62,7 +62,7 @@ class TestAsNumpy:
         assert stream.channels is None
         assert not stream.is_cupy
 
-        chunks = list(stream)
+        chunks = [chunk async for chunk in stream]
         for chunk in chunks:
             assert isinstance(chunk.data, np.ndarray)
         out = concat_time(chunks)

@@ -28,12 +28,10 @@ dependencies = [
     "astropy",
     "atomicwrites",
     "baseband",
-    # Older versions have issues with numpy 2
-    # 13.5.1 suffers from https://github.com/cupy/cupy/issues/9271
-    "cupy>=13.3.0,!=13.5.1",
     "h5py",
     "katsdptelstate[rdb]",
     "numpy",
+    "packaging",
     "platformdirs",
     "rich",
     "scipy",
@@ -52,12 +50,16 @@ dev = [
     "build",
     "pre-commit",
     "pytest",
+    "pytest-asyncio",
     "pytest-cov",
     "pytest-custom-exit-code",
 ]
 doc = [
     "sphinx",
     "sphinx-rtd-theme",
+]
+cuda12x = [
+    "cupy-cuda12x"
 ]
 
 [project.scripts]
@@ -71,6 +73,7 @@ select = [
     "F",  # pyflakes
     "I",  # isort
     "D",  # pydocstyle
+    "U",  # pyupgrade
     "RUF100",  # Unnecessary noqa directives
 ]
 extend-ignore = ["D105", "D107"]  # magic methods
@@ -82,3 +85,7 @@ convention = "numpy"
 python_version = "3.12"
 files = ["src", "test"]
 ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

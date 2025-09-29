@@ -16,11 +16,12 @@
 
 """Load data from MeerKAT beamformer HDF5 files."""
 
+import asyncio
 from collections import deque
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import Self, TypeVar
+from typing import Self
 
 import cupy as cp
 import cupyx
@@ -29,10 +30,10 @@ import numpy as np
 import xarray as xr
 from astropy.time import Time, TimeDelta
 
-_T = TypeVar("_T")
+from .utils import stream_future
 
 
-def _single_value(name: str, values: Sequence[_T]) -> _T:
+def _single_value[T](name: str, values: Sequence[T]) -> T:
     """Check that all values in `values` are the same, and return that value.
 
     Raises
@@ -92,18 +93,17 @@ class _PinnedBuffer:
     """Transfer pinned in CUDA pinned memory."""
 
     def __init__(self, shape: tuple[int, ...], dtype: np.dtype) -> None:
-        self._data = cupyx.empty_pinned(shape, dtype)
-        self._event: cp.cuda.Event | None = None
+        self._data: asyncio.Future[np.ndarray] = asyncio.get_running_loop().create_future()
+        self._data.set_result(cupyx.empty_pinned(shape, dtype))
+        self._event: asyncio.Event | None = None
 
-    def get(self) -> np.ndarray:
+    async def get(self) -> np.ndarray:
         """Get the array, waiting for any recorded event."""
-        if self._event is not None:
-            self._event.synchronize()
-        return self._data
+        return await self._data
 
-    def put(self, event: cp.cuda.Event) -> None:
+    def put(self) -> None:
         """Record that the array is in use for an asynchronous transfer."""
-        self._event = event
+        self._data = stream_future(self._data.result())
 
 
 class HDF5Reader:
@@ -170,7 +170,7 @@ class HDF5Reader:
         """
         return self._stop_ts_adc // self._step_ts_adc
 
-    def __iter__(self) -> Iterator[xr.DataArray]:
+    async def __aiter__(self) -> AsyncIterator[xr.DataArray]:
         chunk_spectra = self._inputs[0].bf_raw.chunks[1]
         chunk_adc = self._step_ts_adc * chunk_spectra
         transfer_shape = (len(self._inputs), self.channels, chunk_spectra, 2)
@@ -184,7 +184,7 @@ class HDF5Reader:
             if self.is_cupy:
                 xp = cp
                 transfer_buf = transfer_bufs.popleft()
-                store = transfer_buf.get()
+                store = await transfer_buf.get()
             else:
                 xp = np
                 store = np.empty(transfer_shape, dtype)
@@ -198,9 +198,7 @@ class HDF5Reader:
             # don't do this earlier because read_direct wants contiguous memory.
             device_store = xp.asarray(store[:, :, : spectrum1 - spectrum0, :])
             if self.is_cupy:
-                event = cp.cuda.Event(disable_timing=True)
-                event.record()
-                transfer_buf.put(event)
+                transfer_buf.put()
                 transfer_bufs.append(transfer_buf)
             # Convert Gaussian integers to complex. TODO: nan out missing data
             # Also transpose the time and channel axes. That's not actually

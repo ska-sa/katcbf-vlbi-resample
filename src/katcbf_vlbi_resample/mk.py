@@ -17,6 +17,7 @@
 """Main script for resampling MeerKAT HDF5 beamformer files."""
 
 import argparse
+import asyncio
 import csv
 import dataclasses
 import hashlib
@@ -276,13 +277,13 @@ class ProgressStream(ChunkwiseStream[xr.DataArray, xr.DataArray]):
         self._progress = progress
         self._task_id = task_id
 
-    def _transform(self, chunk: xr.DataArray) -> xr.DataArray:
+    async def _transform(self, chunk: xr.DataArray) -> xr.DataArray:
         if self._progress is not None:
             self._progress.update(self._task_id, advance=chunk.sizes["time"])
         return chunk
 
 
-def main() -> None:  # noqa: D103
+async def async_main() -> None:  # noqa: D103
     console = Console()
     threads = [{"sideband": sideband, "pol": pol} for sideband in ["lsb", "usb"] for pol in ["pol0", "pol1"]]
     args = parse_args(threads)
@@ -348,7 +349,7 @@ def main() -> None:  # noqa: D103
         with Progress() as progress:
             task_id = progress.add_task("Processing...", total=n_spectra)
             progress_it.set_progress(progress, task_id)
-            for frameset in frameset_it:
+            async for frameset in frameset_it:
                 if fh is None or fh.tell() + frameset.nbytes > args.file_size:
                     if fh is not None:
                         fh.close()
@@ -359,6 +360,10 @@ def main() -> None:  # noqa: D103
             fh.close()
         if power_fh is not None:
             power_fh.close()
+
+
+def main():  # noqa: D103
+    asyncio.run(async_main())
 
 
 if __name__ == "__main__":

@@ -16,26 +16,42 @@
 
 """Convert streams to and from cupy."""
 
+import asyncio
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 
 import cupy as cp
 import cupyx
+import packaging.version
 import xarray as xr
 
 from .stream import ChunkwiseStream, Stream
-from .utils import as_cupy
+from .utils import as_cupy, stream_future
+
+# We don't list cupy in project requirements because there are multiple
+# packages that could provide it (e.g. cupy-cudaNNx for binary wheels),
+# so we check the dependencies at import time.
+_cupy_version = packaging.version.Version(cp.__version__)
+if _cupy_version < packaging.version.Version("13.4"):
+    raise ImportError("cupy >= 13.4 is required", name="cupy")
+if _cupy_version == packaging.version.Version("13.5.1"):
+    raise ImportError("cupy 13.5.1 is not supported due to a bug", name="cupy")
 
 
 class AsCupy(ChunkwiseStream[xr.DataArray, xr.DataArray]):
-    """Transfer a stream from numpy to cupy."""
+    """Transfer a stream from numpy to cupy.
+
+    The transfer is enqueued to the current CUDA stream, but this does
+    not block on the transfer completing.
+    """
 
     def __init__(self, input_data: Stream[xr.DataArray]) -> None:
         super().__init__(input_data)
         self.is_cupy = True
 
-    def _transform(self, chunk: xr.DataArray) -> xr.DataArray:
-        return as_cupy(chunk, blocking=True)
+    async def _transform(self, chunk: xr.DataArray) -> xr.DataArray:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, as_cupy, chunk)
 
 
 class AsNumpy:
@@ -46,22 +62,20 @@ class AsNumpy:
         self.time_scale = input_data.time_scale
         self.channels = input_data.channels
         self.is_cupy = False
-        self._input_it = iter(input_data)
-        self._queue: deque[tuple[xr.DataArray, cp.cuda.Event]] = deque()
+        self._input_it = aiter(input_data)
+        self._queue: deque[asyncio.Future[xr.DataArray]] = deque()
         self._queue_depth = queue_depth
 
-    def _flush(self, max_size: int) -> Iterator[xr.DataArray]:
+    async def _flush(self, max_size: int) -> AsyncIterator[xr.DataArray]:
         while len(self._queue) > max_size:
-            buffer, event = self._queue.popleft()
-            event.synchronize()
-            yield buffer
+            yield (await self._queue.popleft())
 
-    def __iter__(self) -> Iterator[xr.DataArray]:
-        for buffer in self._input_it:
+    async def __aiter__(self) -> AsyncIterator[xr.DataArray]:
+        async for buffer in self._input_it:
             out = cupyx.empty_like_pinned(buffer.data)
             buffer = buffer.copy(data=cp.asnumpy(buffer.data, out=out, blocking=False))
-            event = cp.cuda.Event(disable_timing=True)
-            event.record()
-            self._queue.append((buffer, event))
-            yield from self._flush(self._queue_depth)
-        yield from self._flush(0)
+            self._queue.append(stream_future(buffer))
+            async for chunk in self._flush(self._queue_depth):
+                yield chunk
+        async for chunk in self._flush(0):
+            yield chunk

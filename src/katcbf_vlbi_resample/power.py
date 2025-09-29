@@ -16,6 +16,7 @@
 
 """Normalise power level prior to quantisation."""
 
+import asyncio
 from abc import abstractmethod
 from collections import deque
 from dataclasses import dataclass
@@ -27,7 +28,7 @@ import numpy as np
 import xarray as xr
 
 from .stream import ChunkwiseStream, Stream
-from .utils import as_cupy
+from .utils import as_cupy, stream_future
 
 
 def _rms(array: np.ndarray | cp.ndarray) -> np.ndarray | cp.ndarray:
@@ -50,8 +51,7 @@ def _rms(array: np.ndarray | cp.ndarray) -> np.ndarray | cp.ndarray:
 class _RmsHistoryEntry:
     start: int  # First sample index
     length: int  # Number of samples
-    rms: xr.DataArray  # Numpy-backed RMS
-    event: cp.cuda.Event  # Event to wait for rms to be valid
+    rms: asyncio.Future[xr.DataArray]  # Numpy-backed RMS
 
 
 class MeasurePower(ChunkwiseStream[xr.Dataset, xr.DataArray]):
@@ -65,7 +65,7 @@ class MeasurePower(ChunkwiseStream[xr.Dataset, xr.DataArray]):
     the RMS voltages without a time axis).
     """
 
-    def _transform(self, chunk: xr.DataArray) -> xr.Dataset:
+    async def _transform(self, chunk: xr.DataArray) -> xr.Dataset:
         assert chunk.dtype.kind == "f", "only real floating-point data is supported"
         rms = xr.apply_ufunc(_rms, chunk, input_core_dims=[["time"]], output_dtypes=[chunk.dtype])
         rms.name = "rms"
@@ -108,36 +108,34 @@ class RecordPower(ChunkwiseStream[xr.Dataset, xr.Dataset]):
         """
         pass  # pragma: nocover
 
-    def _transform(self, chunk: xr.Dataset) -> xr.Dataset:
+    async def _transform(self, chunk: xr.Dataset) -> xr.Dataset:
         # Duplicate since the downstream owns the chunk once it's yielded
         rms = chunk["rms"].copy()
         data = chunk["data"]
         if isinstance(rms.data, cp.ndarray):
             rms_out = cupyx.empty_like_pinned(rms.data)
             rms_np = rms.copy(data=cp.asnumpy(rms.data, out=rms_out, blocking=False))
-            event = cp.cuda.Event(disable_timing=True)
-            event.record()
-            entry = _RmsHistoryEntry(data.attrs["time_bias"], data.sizes["time"], rms_np, event)
+            rms_future = stream_future(rms_np)
+            entry = _RmsHistoryEntry(data.attrs["time_bias"], data.sizes["time"], rms_future)
             self._rms_history.append(entry)
             if len(self._rms_history) > self._MAX_HISTORY:
-                self._rms_history[0].event.synchronize()
-            while self._rms_history and self._rms_history[0].event.done:
+                await self._rms_history[0].rms
+            while self._rms_history and self._rms_history[0].rms.done():
                 entry = self._rms_history.popleft()
-                self.record_rms(entry.start, entry.length, entry.rms)
+                self.record_rms(entry.start, entry.length, entry.rms.result())
         else:
             self.record_rms(data.attrs["time_bias"], data.sizes["time"], rms)
 
         return chunk
 
-    def __next__(self) -> xr.Dataset:
+    async def __anext__(self) -> xr.Dataset:
         try:
-            return super().__next__()
-        except StopIteration:
+            return await super().__anext__()
+        except StopAsyncIteration:
             # Flush out _rms_history
             while self._rms_history:
                 entry = self._rms_history.popleft()
-                entry.event.synchronize()
-                self.record_rms(entry.start, entry.length, entry.rms)
+                self.record_rms(entry.start, entry.length, await entry.rms)
             raise
 
 
@@ -182,7 +180,7 @@ class NormalisePower(ChunkwiseStream[xr.DataArray, xr.Dataset]):
         if not isinstance(power, xr.DataArray) and power not in {"auto", "first"}:
             raise ValueError("power must be 'auto', 'first' or a DataArray")
 
-    def _transform(self, chunk: xr.Dataset) -> xr.DataArray:
+    async def _transform(self, chunk: xr.Dataset) -> xr.DataArray:
         if self._mul is not None:
             mul = self._mul
         else:
