@@ -37,6 +37,7 @@ repos:
       - id: pip-compile
         args:
           - "--output-file=requirements.txt"
+          - "--extra=cli"
           - "--extra=dev"
           - "--extra=doc"
           - "--extra=cuda12x"

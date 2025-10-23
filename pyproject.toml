@@ -26,14 +26,9 @@ description = "Proof-of-concept of resampling tied-array-channelised-voltages fo
 requires-python = ">=3.12"
 dependencies = [
     "astropy",
-    "atomicwrites",
     "baseband",
-    "h5py",
-    "katsdptelstate[rdb]",
     "numpy",
     "packaging",
-    "platformdirs",
-    "rich",
     "scipy",
     "xarray",
 ]
@@ -46,6 +41,13 @@ Homepage = "https://github.com/ska-sa/katcbf-vlbi-resample"
 Documentation = "https://katcbf-vlbi-resample.readthedocs.io"
 
 [project.optional-dependencies]
+cli = [
+    "atomicwrites",
+    "h5py",
+    "katsdptelstate[rdb]",
+    "platformdirs",
+    "rich",
+]
 dev = [
     "build",
     "pre-commit",
