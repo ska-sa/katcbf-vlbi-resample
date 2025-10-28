@@ -12,7 +12,8 @@ The code is accelerated using CUDA.
 
 Installation
 ------------
-Run ``pip install -r requirements.txt .``
+Assuming you want to use the command-line tool, run
+Run ``pip install katcbf-vlbi-resample[cli]``
 
 You will additionally need to install `cupy`_, but the process for this
 depends on your CUDA version. For example, if you have CUDA 12.x, you can run
