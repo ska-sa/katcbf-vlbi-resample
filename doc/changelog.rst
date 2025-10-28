@@ -1,7 +1,14 @@
 Changelog
 =========
 
-.. rubric:: 0.2.0
+.. rubric:: 0.3
+
+- Make many dependencies optional. In particular, those needed only for
+  :program:`mk_vlbi_resample` but not the core functionality are placed in
+  a ``cli`` extra. The installation instructions have been updated
+  accordingly.
+
+.. rubric:: 0.2
 
 - Remove hard dependency on cupy Python package, so that users can install a
   binary wheel for it.
@@ -11,6 +18,6 @@ Changelog
 - Correct documentation to indicate that Python 3.12 is the minimum supported
   version.
 
-.. rubric:: 0.1.0
+.. rubric:: 0.1
 
 First public release
