@@ -57,6 +57,11 @@ dev = [
     "pytest-custom-exit-code",
 ]
 doc = [
+    "atomicwrites",
+    "h5py",
+    "katsdptelstate[rdb]",
+    "platformdirs",
+    "rich",
     "sphinx",
     "sphinx-rtd-theme",
 ]

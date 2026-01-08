@@ -3,6 +3,15 @@
 # For the full list of built-in configuration values, see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
+# cupy requires CUDA to be installed, which is inconvenient (and possibly not
+# even possible on readthedocs). Mock it out.
+import sys
+from unittest import mock
+
+for module in ["cupy", "cupyx", "cupyx.scipy", "cupyx.scipy.fft", "cupyx.scipy.signal"]:
+    sys.modules[module] = mock.MagicMock()
+sys.modules["cupy"].__version__ = "13.6.0"
+
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
