@@ -4,3 +4,5 @@
 .coverage
 __pycache__
 *.egg-info
+coverage.xml
+result.xml
