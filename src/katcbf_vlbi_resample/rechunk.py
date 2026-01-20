@@ -16,15 +16,22 @@
 
 """Split and combine chunks to align in time."""
 
+import warnings
 from collections.abc import AsyncIterator, Iterator
-from typing import Final
+from typing import Final, Self
 
 import cupy as cp
 import numpy as np
 import xarray as xr
+from astropy.time import Time
 
 from .stream import Stream
 from .utils import isel_time
+
+
+def _frac_seconds(time: Time) -> float:
+    """Get number of fractional seconds since last UTC second."""
+    return time.utc.ymdhms.second % 1
 
 
 class Rechunk:
@@ -57,6 +64,27 @@ class Rechunk:
         self.time_scale: Final = input_data.time_scale
         self.is_cupy: Final = input_data.is_cupy
         self.channels: Final = input_data.channels
+
+    @classmethod
+    def align_utc_seconds(cls, it: Stream[xr.DataArray]) -> Self:
+        """Create an instance that aligns chunks to UTC seconds.
+
+        The alignment is done as closely as possible, rounding to the nearest sample.
+
+        The alignment will not be possible if the sample rate is not an integer
+        number of Hz (the alignment will drift over time). In this case, a warning
+        will be printed.
+        """
+        # Rechunk to a chunk per UTC second. Note that this relies on having an
+        # integral sampling rate.
+        sample_rate = 1 / it.time_scale
+        if sample_rate.denominator != 1:
+            warnings.warn("Sample rate is not integral Hz, so normalisation periods will not be aligned.")
+        samples_per_chunk = round(sample_rate)
+
+        # Fractional seconds left in the starting second
+        remainder = round(-samples_per_chunk * _frac_seconds(it.time_base)) % samples_per_chunk
+        return cls(it, samples_per_chunk, remainder=remainder)
 
     async def _split_input(self) -> AsyncIterator[xr.DataArray]:
         """Split input chunks on samples_per_chunk boundaries."""

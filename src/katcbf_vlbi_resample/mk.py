@@ -216,29 +216,6 @@ def telescope_state_parameters_from_file(filename: str | os.PathLike, instrument
     return params
 
 
-def _frac_seconds(time: Time) -> float:
-    """Get number of fractional seconds since last UTC second."""
-    return time.utc.ymdhms.second % 1
-
-
-def rechunk_seconds(it: Stream[xr.DataArray]) -> Stream[xr.DataArray]:
-    """Rechunk to align to UTC seconds.
-
-    The alignment will not be possible if the sample rate is not an integer
-    number of Hz. In this case, a warning will be printed.
-    """
-    # Rechunk to a chunk per UTC second. Note that this relies on having an
-    # integral sampling rate.
-    sample_rate = 1 / it.time_scale
-    if sample_rate.denominator != 1:
-        warnings.warn("Sample rate is not integral Hz, so normalisation periods will not be aligned.")
-    period = round(sample_rate)
-
-    # Fractional seconds left in the starting second
-    remainder = round(-period * _frac_seconds(it.time_base)) % period
-    return rechunk.Rechunk(it, round(sample_rate), remainder=remainder)
-
-
 class RecordPower(power.RecordPower):
     """Record power levels to a CSV file."""
 
@@ -323,7 +300,7 @@ async def async_main() -> None:  # noqa: D103
     # Do the main resampling work
     it = resample.Resample(input_params, output_params, resample_params, it)
     # Rechunk to seconds
-    it = rechunk_seconds(it)
+    it = rechunk.Rechunk.align_utc_seconds(it)
     # Measure the power level, for both normalisation and optionally recording
     it_rms: Stream[xr.Dataset] = power.MeasurePower(it)
     if args.record_power is not None:
