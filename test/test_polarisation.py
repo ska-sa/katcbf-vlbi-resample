@@ -23,7 +23,7 @@ import pytest
 import xarray as xr
 from astropy.time import Time
 
-from katcbf_vlbi_resample.polarisation import ConvertPolarisation, parse_spec
+from katcbf_vlbi_resample.polarisation import ConvertPolarisation, parse_spec, to_linear
 from katcbf_vlbi_resample.utils import concat_time, is_cupy
 
 from . import SimpleStream
@@ -37,7 +37,7 @@ class TestParseSpec:
         [
             ("x,y:x,y:x,y", "polarisation spec 'x,y:x,y:x,y' must contain exactly one colon"),
             ("x,y,x:x,y", "polarisation spec 'x,y,x' must contain exactly one comma"),
-            ("x,-x:x,y", "polarisation spec 'x,-x' does not form a basis"),
+            ("x,-x:x,y", "polarisations x,-x do not form a basis"),
             ("x,y:x,z", "polarisation 'z' must be x, y, R, L"),
         ],
     )
@@ -70,6 +70,13 @@ class TestParseSpec:
         expected = np.array([[1, 1j], [1, -1j]]) * np.sqrt(0.5)
         np.testing.assert_allclose(parse_spec("x,y:R,L"), expected, rtol=1e-15)
         np.testing.assert_allclose(parse_spec("R,L:x,y"), np.linalg.inv(expected), rtol=1e-15)
+
+
+def test_to_linear_bad_length() -> None:
+    """Test error handling in :func:`katcbf_vlbi_resample.polarisation.to_linear."""
+    # The normal functionality is indirectly tested via TestParseSpec above.
+    with pytest.raises(ValueError, match="must contain exactly two elements"):
+        to_linear(["x", "y", "R"])
 
 
 class TestConvertPolarisation:

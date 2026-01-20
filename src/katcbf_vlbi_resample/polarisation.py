@@ -43,10 +43,13 @@ _POLARISATIONS = {
 }
 
 
-def _parse_pol(spec: str) -> np.ndarray:
-    """Parse a single polarisation in the :option:`--polarisation` command-line option.
+def parse_pol(spec: str) -> np.ndarray:
+    """Parse a single polarisation.
 
-    The return value is a vector giving the coordinates of a signal of
+    A polarisation is one of ``x``, ``y``, ``R`` or ``L``, optionally prefixed
+    with a ``+`` or ``-``.
+
+    The return value is a vector giving the coordinates of a unit signal of
     this polarisation in linear x, y coordinates.
 
     Raises
@@ -62,11 +65,38 @@ def _parse_pol(spec: str) -> np.ndarray:
     return v
 
 
-def _parse_half_spec(spec: str) -> np.ndarray:
-    """Parse one side of the :option:`!--polarisation` command-line option.
+def to_linear(pols: list[str]) -> np.ndarray:
+    """Create a Jones matrix to convert to a linear coordinate system (x, y).
 
-    The return value is a Jones matrix which converts from the given
-    coordinate system to a linear coordinate system.
+    Parameters
+    ----------
+    pols
+        A list with exactly two elements. Each element is parsed by :func:`parse_pol`.
+
+    Raises
+    ------
+    ValueError
+        If `pols` has the wrong length, :func:`parse_pol` fails to parse a string
+        element, or the two elements are linearly dependent.
+    """
+    if len(pols) != 2:
+        raise ValueError("pols must contain exactly two elements")
+    m = np.column_stack([parse_pol(pol) for pol in pols])
+    if np.linalg.matrix_rank(m) < 2:
+        raise ValueError(f"polarisations {','.join(pols)} do not form a basis")
+    return m
+
+
+def from_linear(pols: list[str]) -> np.ndarray:
+    """Create a Jones matrix to convert to a linear coordinate system (x, y).
+
+    See :func:`to_linear` for details. This function simply returns the inverse.
+    """
+    return np.linalg.inv(to_linear(pols))
+
+
+def _split(spec: str) -> list[str]:
+    """Split a string of the form a,b into two elements.
 
     Raises
     ------
@@ -76,17 +106,18 @@ def _parse_half_spec(spec: str) -> np.ndarray:
     parts = spec.split(",")
     if len(parts) != 2:
         raise ValueError(f"polarisation spec {spec!r} must contain exactly one comma")
-    m = np.column_stack([_parse_pol(part) for part in parts])
-    if np.linalg.matrix_rank(m) < 2:
-        raise ValueError(f"polarisation spec {spec!r} does not form a basis")
-    return m
+    return parts
 
 
 def parse_spec(spec: str) -> np.ndarray:
-    """Parse the :option:`!--polarisation` command-line option.
+    """Parse a polarisation conversion specification.
 
-    The return value is a Jones matrix which is multiplied by
-    the electric field vector to get the output vector.
+    The specification has the form :samp:`{a},{b}:{c},{d}` where `a` and `b`
+    are the basis for the input and `c` and `d` are the basis for the output.
+    See :func:`parse_pol` for the format of these elements.
+
+    The return value is a Jones matrix which is multiplied by the electric
+    field vector to get the output vector.
 
     Raises
     ------
@@ -96,9 +127,9 @@ def parse_spec(spec: str) -> np.ndarray:
     parts = spec.split(":")
     if len(parts) != 2:
         raise ValueError(f"polarisation spec {spec!r} must contain exactly one colon")
-    in_pols = _parse_half_spec(parts[0])
-    out_pols = _parse_half_spec(parts[1])
-    return np.linalg.inv(out_pols) @ in_pols
+    in_pols = _split(parts[0])
+    out_pols = _split(parts[1])
+    return from_linear(out_pols) @ to_linear(in_pols)
 
 
 class ConvertPolarisation(ChunkwiseStream[xr.DataArray, xr.DataArray]):
