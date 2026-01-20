@@ -75,9 +75,8 @@ class TestParseSpec:
 class TestConvertPolarisation:
     """Test :class:`katcbf_vlbi_resample.polarisation.ConvertPolarisation`."""
 
-    async def test(self, xp, time_base: Time, time_scale: Fraction) -> None:
-        """Test :class:`katcbf_vlbi_resample.polarisation.ConvertPolarisation`."""
-        orig_data = xr.DataArray(
+    def _make_orig_data(self, xp, in_pol_labels: list[str]) -> xr.DataArray:
+        return xr.DataArray(
             xp.array(
                 [
                     [1 + 2j, 3 + 5j, 8 - 11j, 1.5, -2.5],
@@ -86,14 +85,22 @@ class TestConvertPolarisation:
                 np.complex64,
             ),
             dims=("pol", "time"),
-            coords={"pol": ["pol0", "pol1"]},
+            coords={"pol": in_pol_labels},
             attrs={"time_bias": 123},
         )
+
+    @pytest.mark.parametrize("in_pol_labels", [["pol0", "pol1"], ["hello", "world"]])
+    @pytest.mark.parametrize("out_pol_labels", [["pol0", "pol1"], ["world", "hello"]])
+    async def test(
+        self, xp, time_base: Time, time_scale: Fraction, in_pol_labels: list[str], out_pol_labels: list[str]
+    ) -> None:
+        """Test :class:`katcbf_vlbi_resample.polarisation.ConvertPolarisation`."""
+        orig_data = self._make_orig_data(xp, in_pol_labels)
         orig = SimpleStream.factory(time_base, time_scale, orig_data, chunk_size=3)
         # This isn't a realistic polarisation basis matrix, but it makes it
         # easy to compute expected values.
         matrix = np.array([[0.0, 2.0], [1.0, -1.0]], np.complex64)
-        out = ConvertPolarisation(orig, matrix)
+        out = ConvertPolarisation(orig, matrix, in_pol_labels=in_pol_labels, out_pol_labels=out_pol_labels)
 
         assert out.is_cupy == orig.is_cupy
         assert out.time_base == orig.time_base
@@ -110,7 +117,18 @@ class TestConvertPolarisation:
                 np.complex64,
             ),
             dims=("pol", "time"),
-            coords={"pol": ["pol0", "pol1"]},
+            coords={"pol": out_pol_labels},
             attrs={"time_bias": 123},
         )
         xr.testing.assert_identical(data, expected)
+
+    async def test_pol_label_mismatch(self, xp, time_base: Time, time_scale: Fraction) -> None:
+        """Test that mismatch of polarisation labels causes an error."""
+        # Reverse the order of the labels on the input
+        orig_data = self._make_orig_data(xp, ["pol1", "pol0"])
+        orig = SimpleStream.factory(time_base, time_scale, orig_data, chunk_size=3)
+        matrix = np.eye(2, dtype=np.complex64)
+        out = ConvertPolarisation(orig, matrix)
+        with pytest.raises(RuntimeError):
+            async for chunk in out:
+                pass

@@ -23,6 +23,7 @@ space. That is valid for MeerKAT for *not* for KAT-7.
 
 import math
 import re
+from collections.abc import Iterable
 
 import cupy as cp
 import numpy as np
@@ -107,14 +108,26 @@ class ConvertPolarisation(ChunkwiseStream[xr.DataArray, xr.DataArray]):
     ----------
     input_data
         Input data stream. Each chunk must contain an axis called `pol` with
-        labels `pol0` and `pol1`, and must not contain an axis called
-        `in_pol`.
+        coordinates given by `in_pol_labels`, and must not contain an axis
+        called `in_pol`.
     matrix
         Jones matrix to convert from input to output polarisation basis.
+    in_pol_labels
+        Coordinates used for the input polarisations (must be a list of 2 elements)
+    out_pol_labels
+        Coordinates that will be used by the polarisations on output.
     """
 
-    def __init__(self, input_data: Stream[xr.DataArray], matrix: np.ndarray) -> None:
+    def __init__(
+        self,
+        input_data: Stream[xr.DataArray],
+        matrix: np.ndarray,
+        in_pol_labels: Iterable[str] = ("pol0", "pol1"),
+        out_pol_labels: Iterable[str] = ("pol0", "pol1"),
+    ) -> None:
         super().__init__(input_data)
+        self.in_pol_labels = list(in_pol_labels)
+        self.out_pol_labels = list(out_pol_labels)
         assert matrix.shape == (2, 2)
         if self.is_cupy:
             # Build a custom kernel that applies the matrix multiplication.
@@ -137,18 +150,24 @@ class ConvertPolarisation(ChunkwiseStream[xr.DataArray, xr.DataArray]):
                 matrix.astype(np.complex64),
                 dims=("pol", "in_pol"),
                 coords={
-                    "pol": ["pol0", "pol1"],
-                    "in_pol": ["pol0", "pol1"],
+                    "pol": self.out_pol_labels,
+                    "in_pol": self.in_pol_labels,
                 },
             )
 
     async def _transform(self, chunk: xr.DataArray) -> xr.DataArray:
+        # This ensures that the ordering matches too. That's important
+        # for the cupy path since it sets the output coordinates in
+        # order rather than based on the input ordering.
+        if chunk.coords["pol"].values.tolist() != self.in_pol_labels:
+            raise RuntimeError("Chunk pol coordinates do not match in_pol_labels")
         if self.is_cupy:
-            pol0 = chunk.sel({"pol": "pol0"})
-            pol1 = chunk.sel({"pol": "pol1"})
+            pol0 = chunk.sel({"pol": self.in_pol_labels[0]})
+            pol1 = chunk.sel({"pol": self.in_pol_labels[1]})
             # Transform in-place
             self._kernel(pol0.data, pol1.data, pol0.data, pol1.data)
-            return chunk
+            # Relabel
+            return chunk.assign_coords(pol=self.out_pol_labels)
         else:
             out = self._matrix.dot(chunk.rename({"pol": "in_pol"}), dim="in_pol")
             out.attrs = chunk.attrs
