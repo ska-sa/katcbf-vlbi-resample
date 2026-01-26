@@ -325,14 +325,17 @@ class Resample:
             # leaves the phase of upfirdn intact for the next batch.
             stop -= (stop - self._fir_discard_left) % n
             if stop > self._fir_discard_left:
-                mix_scale = Fraction(self._mix_freq) * self._in_time_scale
-                # Compute the phase for the first sample using Fraction to avoid
-                # rounding errors creeping in when time_bias is large.
-                start_cycles = mix_scale * buffer.attrs["time_bias"]
-                start_cycles -= round(start_cycles)
-                mixer = _mixer(buffer, float(mix_scale), float(start_cycles))
-                mixed = buffer * mixer
-                mixed.attrs = buffer.attrs
+                if self._mix_freq != 0.0:
+                    mix_scale = Fraction(self._mix_freq) * self._in_time_scale
+                    # Compute the phase for the first sample using Fraction to avoid
+                    # rounding errors creeping in when time_bias is large.
+                    start_cycles = mix_scale * buffer.attrs["time_bias"]
+                    start_cycles -= round(start_cycles)
+                    mixer = _mixer(buffer, float(mix_scale), float(start_cycles))
+                    mixed = buffer * mixer
+                    mixed.attrs = buffer.attrs
+                else:
+                    mixed = buffer
                 convolved = _upfirdn(self._fir, mixed, self._ratio)
                 convolved = _split_sidebands(convolved, self._hilbert)
                 convolved = isel_time(convolved, np.s_[self._fir_discard_left : stop])

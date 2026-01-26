@@ -129,10 +129,14 @@ class TestIFFT:
 class TestResample:
     """Test :class:`.Resample`."""
 
-    @pytest.fixture
-    def mixer_frequency(self) -> float:
-        """Difference between input and output centre frequencies."""
-        return 8e6
+    @pytest.fixture(params=[0.0, 8e6])
+    def mixer_frequency(self, request: pytest.FixtureRequest) -> float:
+        """Difference between input and output centre frequencies.
+
+        This fixture is parametrised to test both the fast path when
+        the mixer frequency is zero as well as the more general case.
+        """
+        return request.param
 
     @pytest.fixture
     def output_bandwidth(self) -> float:
