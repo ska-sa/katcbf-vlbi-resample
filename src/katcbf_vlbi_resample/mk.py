@@ -42,7 +42,7 @@ from rich.console import Console
 from rich.progress import Progress
 
 from . import cupy_bridge, hdf5_reader, polarisation, power, rechunk, resample, vdif_writer
-from .parameters import ResampleParameters, StreamParameters
+from .parameters import ResampleParameters
 from .stream import ChunkwiseStream, Stream
 from .utils import fraction_to_time_delta
 
@@ -268,8 +268,7 @@ async def async_main() -> None:  # noqa: D103
     with console.status("Loading telescope state parameters..."):
         telstate_params = telescope_state_parameters_from_file(args.telstate, args.instrument)
 
-    input_params = StreamParameters(bandwidth=telstate_params.bandwidth, center_freq=telstate_params.center_freq)
-    output_params = StreamParameters(bandwidth=args.bandwidth, center_freq=args.frequency)
+    mixer_frequency = telstate_params.center_freq - args.frequency
     resample_params = ResampleParameters(fir_taps=args.fir_taps, hilbert_taps=args.hilbert_taps, passband=args.passband)
 
     is_cupy = not args.cpu
@@ -298,7 +297,7 @@ async def async_main() -> None:  # noqa: D103
     if args.polarisation is not None:
         it = polarisation.ConvertPolarisation(it, args.polarisation)
     # Do the main resampling work
-    it = resample.Resample(input_params, output_params, resample_params, it)
+    it = resample.Resample(args.bandwidth, mixer_frequency, resample_params, it)
     # Rechunk to seconds
     it = rechunk.Rechunk.align_utc_seconds(it)
     # Measure the power level, for both normalisation and optionally recording

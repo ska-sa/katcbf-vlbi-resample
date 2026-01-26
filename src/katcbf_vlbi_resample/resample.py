@@ -26,7 +26,7 @@ import xarray as xr
 from astropy.time import Time, TimeDelta
 
 from . import xrsig
-from .parameters import ResampleParameters, StreamParameters
+from .parameters import ResampleParameters
 from .stream import ChunkwiseStream, Stream
 from .utils import as_cupy, concat_time, isel_time, time_align
 
@@ -249,26 +249,36 @@ class Resample:
     Each input array must have a `time` dimension, and it must have
     a coordinate that contains consecutive integers. Each subsequent
     chunk must also follow on contiguously from the previous one. Chunks need
-    not be the same size. Input samples are expected to be complex values,
-    and the sampling rate equals the bandwidth.
+    not be the same size. Input samples are expected to be complex values.
 
     The output has an additional `sideband` dimension to indicate the lower
     (`lsb`) or upper (`usb`) sideband. Output samples are real.
+
+    Parameters
+    ----------
+    output_bandwidth
+        The total bandwidth across both sidebands. This is also the sampling
+        rate of each (real) sideband signal.
+    mixer_frequency
+        The centre frequency of the input stream minus the centre frequency
+        of the output stream.
+    resample_params
+        Parameters controlling the response of the resampling filters.
+    input_data
+        The input data stream.
     """
 
     def __init__(
         self,
-        input_params: StreamParameters,
-        output_params: StreamParameters,
+        output_bandwidth: float | Fraction,
+        mixer_frequency: float,
         resample_params: ResampleParameters,
         input_data: Stream[xr.DataArray],
     ) -> None:
-        if input_params.bandwidth < output_params.bandwidth:
+        input_bandwidth = 1 / input_data.time_scale
+        if input_bandwidth < output_bandwidth:
             raise ValueError("Cannot produce more output bandwidth than input")
-        if Fraction(input_params.bandwidth) * input_data.time_scale != 1:
-            # TODO: just eliminate bandwidth from StreamParameters?
-            raise ValueError("Input bandwidth is not consistent with the input stream")
-        self._ratio = Fraction(output_params.bandwidth) / Fraction(input_params.bandwidth)
+        self._ratio = Fraction(output_bandwidth) / Fraction(input_bandwidth)
         n, d = self._ratio.as_integer_ratio()
         self._fir = _fir_coeff_win(resample_params.fir_taps, resample_params.passband, self._ratio)
         # upfirdn does a full convolution, so we need to trim the result to get
@@ -280,7 +290,7 @@ class Resample:
         # output. That happens when t * n - fir_taps // 2 is divisible by d.
         self._time_bias_mod = resample_params.fir_taps // 2 * pow(n, -1, mod=d) % d
         self._hilbert = _hilbert_coeff_win(resample_params.hilbert_taps)
-        self._mix_freq = input_params.center_freq - output_params.center_freq
+        self._mix_freq = mixer_frequency
         self._input_it = aiter(input_data)
         self._in_time_scale = input_data.time_scale
         self.time_base = input_data.time_base

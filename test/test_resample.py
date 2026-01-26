@@ -22,7 +22,7 @@ import pytest
 import xarray as xr
 from astropy.time import Time
 
-from katcbf_vlbi_resample.parameters import ResampleParameters, StreamParameters
+from katcbf_vlbi_resample.parameters import ResampleParameters
 from katcbf_vlbi_resample.resample import IFFT, ClipTime, Resample
 from katcbf_vlbi_resample.utils import concat_time
 
@@ -130,20 +130,14 @@ class TestResample:
     """Test :class:`.Resample`."""
 
     @pytest.fixture
-    def input_params(self) -> StreamParameters:
-        """Input parameters fixture."""
-        return StreamParameters(
-            bandwidth=107e6,
-            center_freq=428e6,
-        )
+    def mixer_frequency(self) -> float:
+        """Difference between input and output centre frequencies."""
+        return 8e6
 
     @pytest.fixture
-    def output_params(self) -> StreamParameters:
-        """Output parameters fixture."""
-        return StreamParameters(
-            bandwidth=64e6,
-            center_freq=420e6,
-        )
+    def output_bandwidth(self) -> float:
+        """Output bandwidth."""
+        return 64e6
 
     @pytest.fixture
     def resample_params(self) -> ResampleParameters:
@@ -155,16 +149,16 @@ class TestResample:
         )
 
     @pytest.fixture
-    def time_scale(self, input_params: StreamParameters) -> Fraction:
+    def time_scale(self) -> Fraction:
         """Time scale for input stream."""
-        return 1 / Fraction(input_params.bandwidth)
+        return 1 / Fraction(107e6)
 
     @pytest.mark.parametrize("chunk_size", [100, 20000])
     async def test_chunk_consistency(
         self,
         xp,
-        input_params: StreamParameters,
-        output_params: StreamParameters,
+        output_bandwidth: float,
+        mixer_frequency: float,
         resample_params: ResampleParameters,
         time_base: Time,
         time_scale: Fraction,
@@ -180,8 +174,8 @@ class TestResample:
         )
         orig1 = SimpleStream.factory(time_base, time_scale, data)
         orig2 = SimpleStream.factory(time_base, time_scale, data, chunk_size)
-        resample1 = Resample(input_params, output_params, resample_params, orig1)
-        resample2 = Resample(input_params, output_params, resample_params, orig2)
+        resample1 = Resample(output_bandwidth, mixer_frequency, resample_params, orig1)
+        resample2 = Resample(output_bandwidth, mixer_frequency, resample_params, orig2)
         out1 = [chunk async for chunk in resample1]
         out2 = [chunk async for chunk in resample2]
         out1c = xr.concat(out1, dim="time")
@@ -192,18 +186,19 @@ class TestResample:
     async def test_group_delay(
         self,
         xp,
-        input_params: StreamParameters,
-        output_params: StreamParameters,
+        output_bandwidth: float,
+        mixer_frequency: float,
         resample_params: ResampleParameters,
         time_base: Time,
         time_scale: Fraction,
     ) -> None:
         """Check that timestamp attributes correctly yield zero group delay."""
-        freqs = [400e6, 410e6, 445e6, 450e6]
+        # Frequencies relative to the centre frequency
+        freqs = [-28e6, -18e6, 17e6, 22e6]
         n = 100000
         attrs = {"time_bias": 12345}
         t = (xp.arange(n) + float(attrs["time_bias"])) * float(time_scale)
-        tones = xp.stack([xp.exp(2j * xp.pi * (f - input_params.center_freq) * t) for f in freqs])
+        tones = xp.stack([xp.exp(2j * xp.pi * f * t) for f in freqs])
         data = xr.DataArray(
             tones,
             dims=("freq", "time"),
@@ -211,19 +206,19 @@ class TestResample:
             attrs=attrs,
         )
         orig = SimpleStream.factory(time_base, time_scale, data)
-        resample = Resample(input_params, output_params, resample_params, orig)
+        resample = Resample(output_bandwidth, mixer_frequency, resample_params, orig)
         out = [chunk async for chunk in resample]
         assert len(out) == 1
         for f in freqs:
             res = out[0].sel(freq=f)
-            if f < output_params.center_freq:
+            if f < -mixer_frequency:
                 res = res.sel(sideband="lsb")
             else:
                 res = res.sel(sideband="usb")
             # Regenerate the expected tone at the adjusted sampling rate and using
             # the updated timestamp information
             t = (xp.arange(res.sizes["time"]) + float(res.attrs["time_bias"])) * float(resample.time_scale)
-            tone = xp.exp(2j * xp.pi * (f - output_params.center_freq) * t)
+            tone = xp.exp(2j * xp.pi * (f + mixer_frequency) * t)
             # Correlate to get the phase
             phase = float(xp.angle(xp.vdot(tone, res.data)))
             assert phase == pytest.approx(0.0, abs=1e-7)

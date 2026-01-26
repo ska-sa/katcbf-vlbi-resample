@@ -20,14 +20,6 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class StreamParameters:
-    """Parameters of a time-domain stream of samples."""
-
-    bandwidth: float  # Hz
-    center_freq: float  # Hz
-
-
-@dataclass(frozen=True)
 class ResampleParameters:
     """Parameters controlling the resampling process."""
 
