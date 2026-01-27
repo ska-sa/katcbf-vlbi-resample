@@ -10,7 +10,6 @@ from unittest import mock
 
 for module in ["cupy", "cupyx", "cupyx.scipy", "cupyx.scipy.fft", "cupyx.scipy.signal"]:
     sys.modules[module] = mock.MagicMock()
-sys.modules["cupy"].__version__ = "13.6.0"
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
