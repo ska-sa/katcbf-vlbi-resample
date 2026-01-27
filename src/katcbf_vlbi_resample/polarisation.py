@@ -23,7 +23,7 @@ space. That is valid for MeerKAT for *not* for KAT-7.
 
 import math
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 import cupy as cp
 import numpy as np
@@ -65,13 +65,13 @@ def parse_pol(spec: str) -> np.ndarray:
     return v
 
 
-def to_linear(pols: list[str]) -> np.ndarray:
+def to_linear(pols: Sequence[str]) -> np.ndarray:
     """Create a Jones matrix to convert to a linear coordinate system (x, y).
 
     Parameters
     ----------
     pols
-        A list with exactly two elements. Each element is parsed by :func:`parse_pol`.
+        A sequence with exactly two elements. Each element is parsed by :func:`parse_pol`.
 
     Raises
     ------
@@ -87,7 +87,7 @@ def to_linear(pols: list[str]) -> np.ndarray:
     return m
 
 
-def from_linear(pols: list[str]) -> np.ndarray:
+def from_linear(pols: Sequence[str]) -> np.ndarray:
     """Create a Jones matrix to convert to a linear coordinate system (x, y).
 
     See :func:`to_linear` for details. This function simply returns the inverse.
