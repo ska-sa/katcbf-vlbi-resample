@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2024-2025, National Research Foundation (SARAO)
+# Copyright (c) 2024-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -42,7 +42,7 @@ from rich.console import Console
 from rich.progress import Progress
 
 from . import cupy_bridge, hdf5_reader, polarisation, power, rechunk, resample, vdif_writer
-from .parameters import ResampleParameters, StreamParameters
+from .parameters import ResampleParameters
 from .stream import ChunkwiseStream, Stream
 from .utils import fraction_to_time_delta
 
@@ -216,29 +216,6 @@ def telescope_state_parameters_from_file(filename: str | os.PathLike, instrument
     return params
 
 
-def _frac_seconds(time: Time) -> float:
-    """Get number of fractional seconds since last UTC second."""
-    return time.utc.ymdhms.second % 1
-
-
-def rechunk_seconds(it: Stream[xr.DataArray]) -> Stream[xr.DataArray]:
-    """Rechunk to align to UTC seconds.
-
-    The alignment will not be possible if the sample rate is not an integer
-    number of Hz. In this case, a warning will be printed.
-    """
-    # Rechunk to a chunk per UTC second. Note that this relies on having an
-    # integral sampling rate.
-    sample_rate = 1 / it.time_scale
-    if sample_rate.denominator != 1:
-        warnings.warn("Sample rate is not integral Hz, so normalisation periods will not be aligned.")
-    period = round(sample_rate)
-
-    # Fractional seconds left in the starting second
-    remainder = round(-period * _frac_seconds(it.time_base)) % period
-    return rechunk.Rechunk(it, round(sample_rate), remainder=remainder)
-
-
 class RecordPower(power.RecordPower):
     """Record power levels to a CSV file."""
 
@@ -291,8 +268,7 @@ async def async_main() -> None:  # noqa: D103
     with console.status("Loading telescope state parameters..."):
         telstate_params = telescope_state_parameters_from_file(args.telstate, args.instrument)
 
-    input_params = StreamParameters(bandwidth=telstate_params.bandwidth, center_freq=telstate_params.center_freq)
-    output_params = StreamParameters(bandwidth=args.bandwidth, center_freq=args.frequency)
+    mixer_frequency = telstate_params.center_freq - args.frequency
     resample_params = ResampleParameters(fir_taps=args.fir_taps, hilbert_taps=args.hilbert_taps, passband=args.passband)
 
     is_cupy = not args.cpu
@@ -321,9 +297,9 @@ async def async_main() -> None:  # noqa: D103
     if args.polarisation is not None:
         it = polarisation.ConvertPolarisation(it, args.polarisation)
     # Do the main resampling work
-    it = resample.Resample(input_params, output_params, resample_params, it)
+    it = resample.Resample(args.bandwidth, mixer_frequency, resample_params, it)
     # Rechunk to seconds
-    it = rechunk_seconds(it)
+    it = rechunk.Rechunk.align_utc_seconds(it)
     # Measure the power level, for both normalisation and optionally recording
     it_rms: Stream[xr.Dataset] = power.MeasurePower(it)
     if args.record_power is not None:

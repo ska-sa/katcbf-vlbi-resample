@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2024, National Research Foundation (SARAO)
+# Copyright (c) 2024, 2026 National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -17,14 +17,6 @@
 """Dataclasses to encapsulate configuration."""
 
 from dataclasses import dataclass
-
-
-@dataclass(frozen=True)
-class StreamParameters:
-    """Parameters of a time-domain stream of samples."""
-
-    bandwidth: float  # Hz
-    center_freq: float  # Hz
 
 
 @dataclass(frozen=True)

@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2025, National Research Foundation (SARAO)
+# Copyright (c) 2025-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -23,7 +23,7 @@ import pytest
 import xarray as xr
 from astropy.time import Time
 
-from katcbf_vlbi_resample.polarisation import ConvertPolarisation, parse_spec
+from katcbf_vlbi_resample.polarisation import ConvertPolarisation, parse_spec, to_linear
 from katcbf_vlbi_resample.utils import concat_time, is_cupy
 
 from . import SimpleStream
@@ -37,7 +37,7 @@ class TestParseSpec:
         [
             ("x,y:x,y:x,y", "polarisation spec 'x,y:x,y:x,y' must contain exactly one colon"),
             ("x,y,x:x,y", "polarisation spec 'x,y,x' must contain exactly one comma"),
-            ("x,-x:x,y", "polarisation spec 'x,-x' does not form a basis"),
+            ("x,-x:x,y", "polarisations 'x,-x' do not form a basis"),
             ("x,y:x,z", "polarisation 'z' must be x, y, R, L"),
         ],
     )
@@ -72,12 +72,18 @@ class TestParseSpec:
         np.testing.assert_allclose(parse_spec("R,L:x,y"), np.linalg.inv(expected), rtol=1e-15)
 
 
+def test_to_linear_bad_length() -> None:
+    """Test error handling in :func:`katcbf_vlbi_resample.polarisation.to_linear."""
+    # The normal functionality is indirectly tested via TestParseSpec above.
+    with pytest.raises(ValueError, match="must contain exactly two elements"):
+        to_linear(["x", "y", "R"])
+
+
 class TestConvertPolarisation:
     """Test :class:`katcbf_vlbi_resample.polarisation.ConvertPolarisation`."""
 
-    async def test(self, xp, time_base: Time, time_scale: Fraction) -> None:
-        """Test :class:`katcbf_vlbi_resample.polarisation.ConvertPolarisation`."""
-        orig_data = xr.DataArray(
+    def _make_orig_data(self, xp, in_pol_labels: list[str]) -> xr.DataArray:
+        return xr.DataArray(
             xp.array(
                 [
                     [1 + 2j, 3 + 5j, 8 - 11j, 1.5, -2.5],
@@ -86,14 +92,22 @@ class TestConvertPolarisation:
                 np.complex64,
             ),
             dims=("pol", "time"),
-            coords={"pol": ["pol0", "pol1"]},
+            coords={"pol": in_pol_labels},
             attrs={"time_bias": 123},
         )
+
+    @pytest.mark.parametrize("in_pol_labels", [["pol0", "pol1"], ["hello", "world"]])
+    @pytest.mark.parametrize("out_pol_labels", [["pol0", "pol1"], ["world", "hello"]])
+    async def test(
+        self, xp, time_base: Time, time_scale: Fraction, in_pol_labels: list[str], out_pol_labels: list[str]
+    ) -> None:
+        """Test :class:`katcbf_vlbi_resample.polarisation.ConvertPolarisation`."""
+        orig_data = self._make_orig_data(xp, in_pol_labels)
         orig = SimpleStream.factory(time_base, time_scale, orig_data, chunk_size=3)
         # This isn't a realistic polarisation basis matrix, but it makes it
         # easy to compute expected values.
         matrix = np.array([[0.0, 2.0], [1.0, -1.0]], np.complex64)
-        out = ConvertPolarisation(orig, matrix)
+        out = ConvertPolarisation(orig, matrix, in_pol_labels=in_pol_labels, out_pol_labels=out_pol_labels)
 
         assert out.is_cupy == orig.is_cupy
         assert out.time_base == orig.time_base
@@ -110,7 +124,18 @@ class TestConvertPolarisation:
                 np.complex64,
             ),
             dims=("pol", "time"),
-            coords={"pol": ["pol0", "pol1"]},
+            coords={"pol": out_pol_labels},
             attrs={"time_bias": 123},
         )
         xr.testing.assert_identical(data, expected)
+
+    async def test_pol_label_mismatch(self, xp, time_base: Time, time_scale: Fraction) -> None:
+        """Test that mismatch of polarisation labels causes an error."""
+        # Reverse the order of the labels on the input
+        orig_data = self._make_orig_data(xp, ["pol1", "pol0"])
+        orig = SimpleStream.factory(time_base, time_scale, orig_data, chunk_size=3)
+        matrix = np.eye(2, dtype=np.complex64)
+        out = ConvertPolarisation(orig, matrix)
+        with pytest.raises(RuntimeError):
+            async for chunk in out:
+                pass

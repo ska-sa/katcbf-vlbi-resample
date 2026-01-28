@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2024, National Research Foundation (SARAO)
+# Copyright (c) 2024-2026 National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -31,11 +31,15 @@ from .utils import as_cupy, stream_future
 # We don't list cupy in project requirements because there are multiple
 # packages that could provide it (e.g. cupy-cudaNNx for binary wheels),
 # so we check the dependencies at import time.
-_cupy_version = packaging.version.Version(cp.__version__)
-if _cupy_version < packaging.version.Version("13.4"):
-    raise ImportError("cupy >= 13.4 is required", name="cupy")
-if _cupy_version == packaging.version.Version("13.5.1"):
-    raise ImportError("cupy 13.5.1 is not supported due to a bug", name="cupy")
+#
+# When building documentation we mock out cupy in a way that
+# would break these tests; in that case, just skip them.
+if hasattr(cp, "__version__") and isinstance(cp.__version__, str):
+    _cupy_version = packaging.version.Version(cp.__version__)
+    if _cupy_version < packaging.version.Version("13.4"):
+        raise ImportError("cupy >= 13.4 is required", name="cupy")
+    if _cupy_version == packaging.version.Version("13.5.1"):
+        raise ImportError("cupy 13.5.1 is not supported due to a bug", name="cupy")
 
 
 class AsCupy(ChunkwiseStream[xr.DataArray, xr.DataArray]):

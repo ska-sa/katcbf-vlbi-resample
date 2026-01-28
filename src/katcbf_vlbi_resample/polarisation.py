@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2025, National Research Foundation (SARAO)
+# Copyright (c) 2025-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -23,6 +23,7 @@ space. That is valid for MeerKAT for *not* for KAT-7.
 
 import math
 import re
+from collections.abc import Iterable, Sequence
 
 import cupy as cp
 import numpy as np
@@ -42,10 +43,13 @@ _POLARISATIONS = {
 }
 
 
-def _parse_pol(spec: str) -> np.ndarray:
-    """Parse a single polarisation in the :option:`--polarisation` command-line option.
+def parse_pol(spec: str) -> np.ndarray:
+    """Parse a single polarisation.
 
-    The return value is a vector giving the coordinates of a signal of
+    A polarisation is one of ``x``, ``y``, ``R`` or ``L``, optionally prefixed
+    with a ``+`` or ``-``.
+
+    The return value is a vector giving the coordinates of a unit signal of
     this polarisation in linear x, y coordinates.
 
     Raises
@@ -61,11 +65,38 @@ def _parse_pol(spec: str) -> np.ndarray:
     return v
 
 
-def _parse_half_spec(spec: str) -> np.ndarray:
-    """Parse one side of the :option:`!--polarisation` command-line option.
+def to_linear(pols: Sequence[str]) -> np.ndarray:
+    """Create a Jones matrix to convert to a linear coordinate system (x, y).
 
-    The return value is a Jones matrix which converts from the given
-    coordinate system to a linear coordinate system.
+    Parameters
+    ----------
+    pols
+        A sequence with exactly two elements. Each element is parsed by :func:`parse_pol`.
+
+    Raises
+    ------
+    ValueError
+        If `pols` has the wrong length, :func:`parse_pol` fails to parse a string
+        element, or the two elements are linearly dependent.
+    """
+    if len(pols) != 2:
+        raise ValueError("pols must contain exactly two elements")
+    m = np.column_stack([parse_pol(pol) for pol in pols])
+    if np.linalg.matrix_rank(m) < 2:
+        raise ValueError(f"polarisations {','.join(pols)!r} do not form a basis")
+    return m
+
+
+def from_linear(pols: Sequence[str]) -> np.ndarray:
+    """Create a Jones matrix to convert to a linear coordinate system (x, y).
+
+    See :func:`to_linear` for details. This function simply returns the inverse.
+    """
+    return np.linalg.inv(to_linear(pols))
+
+
+def _split(spec: str) -> list[str]:
+    """Split a string of the form a,b into two elements.
 
     Raises
     ------
@@ -75,17 +106,18 @@ def _parse_half_spec(spec: str) -> np.ndarray:
     parts = spec.split(",")
     if len(parts) != 2:
         raise ValueError(f"polarisation spec {spec!r} must contain exactly one comma")
-    m = np.column_stack([_parse_pol(part) for part in parts])
-    if np.linalg.matrix_rank(m) < 2:
-        raise ValueError(f"polarisation spec {spec!r} does not form a basis")
-    return m
+    return parts
 
 
 def parse_spec(spec: str) -> np.ndarray:
-    """Parse the :option:`!--polarisation` command-line option.
+    """Parse a polarisation conversion specification.
 
-    The return value is a Jones matrix which is multiplied by
-    the electric field vector to get the output vector.
+    The specification has the form :samp:`{a},{b}:{c},{d}` where `a` and `b`
+    are the basis for the input and `c` and `d` are the basis for the output.
+    See :func:`parse_pol` for the format of these elements.
+
+    The return value is a Jones matrix which is multiplied by the electric
+    field vector to get the output vector.
 
     Raises
     ------
@@ -95,9 +127,9 @@ def parse_spec(spec: str) -> np.ndarray:
     parts = spec.split(":")
     if len(parts) != 2:
         raise ValueError(f"polarisation spec {spec!r} must contain exactly one colon")
-    in_pols = _parse_half_spec(parts[0])
-    out_pols = _parse_half_spec(parts[1])
-    return np.linalg.inv(out_pols) @ in_pols
+    in_pols = _split(parts[0])
+    out_pols = _split(parts[1])
+    return from_linear(out_pols) @ to_linear(in_pols)
 
 
 class ConvertPolarisation(ChunkwiseStream[xr.DataArray, xr.DataArray]):
@@ -107,14 +139,26 @@ class ConvertPolarisation(ChunkwiseStream[xr.DataArray, xr.DataArray]):
     ----------
     input_data
         Input data stream. Each chunk must contain an axis called `pol` with
-        labels `pol0` and `pol1`, and must not contain an axis called
-        `in_pol`.
+        coordinates given by `in_pol_labels`, and must not contain an axis
+        called `in_pol`.
     matrix
         Jones matrix to convert from input to output polarisation basis.
+    in_pol_labels
+        Coordinates used for the input polarisations (must be a list of 2 elements)
+    out_pol_labels
+        Coordinates that will be used by the polarisations on output.
     """
 
-    def __init__(self, input_data: Stream[xr.DataArray], matrix: np.ndarray) -> None:
+    def __init__(
+        self,
+        input_data: Stream[xr.DataArray],
+        matrix: np.ndarray,
+        in_pol_labels: Iterable[str] = ("pol0", "pol1"),
+        out_pol_labels: Iterable[str] = ("pol0", "pol1"),
+    ) -> None:
         super().__init__(input_data)
+        self.in_pol_labels = list(in_pol_labels)
+        self.out_pol_labels = list(out_pol_labels)
         assert matrix.shape == (2, 2)
         if self.is_cupy:
             # Build a custom kernel that applies the matrix multiplication.
@@ -137,18 +181,24 @@ class ConvertPolarisation(ChunkwiseStream[xr.DataArray, xr.DataArray]):
                 matrix.astype(np.complex64),
                 dims=("pol", "in_pol"),
                 coords={
-                    "pol": ["pol0", "pol1"],
-                    "in_pol": ["pol0", "pol1"],
+                    "pol": self.out_pol_labels,
+                    "in_pol": self.in_pol_labels,
                 },
             )
 
     async def _transform(self, chunk: xr.DataArray) -> xr.DataArray:
+        # This ensures that the ordering matches too. That's important
+        # for the cupy path since it sets the output coordinates in
+        # order rather than based on the input ordering.
+        if chunk.coords["pol"].values.tolist() != self.in_pol_labels:
+            raise RuntimeError("Chunk pol coordinates do not match in_pol_labels")
         if self.is_cupy:
-            pol0 = chunk.sel({"pol": "pol0"})
-            pol1 = chunk.sel({"pol": "pol1"})
+            pol0 = chunk.sel({"pol": self.in_pol_labels[0]})
+            pol1 = chunk.sel({"pol": self.in_pol_labels[1]})
             # Transform in-place
             self._kernel(pol0.data, pol1.data, pol0.data, pol1.data)
-            return chunk
+            # Relabel
+            return chunk.assign_coords(pol=self.out_pol_labels)
         else:
             out = self._matrix.dot(chunk.rename({"pol": "in_pol"}), dim="in_pol")
             out.attrs = chunk.attrs
