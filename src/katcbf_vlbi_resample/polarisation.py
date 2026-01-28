@@ -83,7 +83,7 @@ def to_linear(pols: Sequence[str]) -> np.ndarray:
         raise ValueError("pols must contain exactly two elements")
     m = np.column_stack([parse_pol(pol) for pol in pols])
     if np.linalg.matrix_rank(m) < 2:
-        raise ValueError(f"polarisations {','.join(pols)} do not form a basis")
+        raise ValueError(f"polarisations {','.join(pols)!r} do not form a basis")
     return m
 
 

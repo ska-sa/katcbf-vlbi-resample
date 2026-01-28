@@ -37,7 +37,7 @@ class TestParseSpec:
         [
             ("x,y:x,y:x,y", "polarisation spec 'x,y:x,y:x,y' must contain exactly one colon"),
             ("x,y,x:x,y", "polarisation spec 'x,y,x' must contain exactly one comma"),
-            ("x,-x:x,y", "polarisations x,-x do not form a basis"),
+            ("x,-x:x,y", "polarisations 'x,-x' do not form a basis"),
             ("x,y:x,z", "polarisation 'z' must be x, y, R, L"),
         ],
     )
