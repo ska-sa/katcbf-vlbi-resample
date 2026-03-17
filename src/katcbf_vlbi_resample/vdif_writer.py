@@ -25,35 +25,34 @@ import cupy as cp
 import numpy as np
 import xarray as xr
 from astropy.time import Time, TimeDelta
-from baseband.base.encoding import TWO_BIT_1_SIGMA
 
 from .stream import Stream
 from .utils import concat_time, isel_time, time_align
 
 
 @cp.fuse
-def _encode_2bit_prep(values):
-    xp = cp.get_array_module(values)
-    return xp.clip(values * (1 / TWO_BIT_1_SIGMA) + 2, 0, 3).astype(np.uint8)
+def _encode_2bit_prep(values, scale: float):
+    xp = cp.get_array_module(values, scale)
+    return xp.clip(values * scale + 2, 0, 3).astype(np.uint8)
 
 
-def _encode_2bit(values):
+def _encode_2bit(values, threshold: float):
     """Encode values using 2 bits per value, packing the result into bytes.
 
-    This is equivalent to :func:`baseband.vdif.encode_2bit`, but supports
-    cupy. Note that values very close to the threshold might round
-    differently.
+    This is equivalent to :func:`baseband.vdif.encode_2bit` but it supports a
+    custom threshold and cupy. Note that values very close to the threshold
+    might round differently.
     """
     xp = cp.get_array_module(values)
-    values = _encode_2bit_prep(values)
+    values = _encode_2bit_prep(values, 1.0 / threshold)
     values = values.reshape(values.shape[:-1] + (-1, 4))
     values <<= xp.arange(0, 8, 2, dtype=np.uint8)
     # cupy doesn't currently support np.bitwise_or.reduce
     return values[..., 0] | values[..., 1] | values[..., 2] | values[..., 3]
 
 
-def _encode_2bit_words(values):
-    return _encode_2bit(values).view("<u4")
+def _encode_2bit_words(values, threshold: float):
+    return _encode_2bit(values, threshold).view("<u4")
 
 
 def _reference_epoch(time: Time) -> tuple[Time, int]:
@@ -84,8 +83,9 @@ def _reference_epoch(time: Time) -> tuple[Time, int]:
 class VDIFEncode2Bit:
     """Quantise and pack values to 2-bit samples.
 
-    The power levels must have already been adjusted such that :mod:`baseband`
-    will quantise correctly.
+    Values are quantised by comparing the absolute value to `threshold`.
+    The power levels must already have been adjusted to make this an
+    threshold appropriate.
 
     The output array is in units of VDIF words (32-bit little-endian) rather
     than samples, and `time_bias` is also in units of words. Only real-valued
@@ -100,7 +100,7 @@ class VDIFEncode2Bit:
 
     SAMPLES_PER_WORD: Final = 16
 
-    def __init__(self, input_data: Stream[xr.DataArray], samples_per_frame: int) -> None:
+    def __init__(self, input_data: Stream[xr.DataArray], samples_per_frame: int, threshold: float) -> None:
         if input_data.channels is not None:
             raise ValueError("VDIFEncoder2Bit currently only supports unchannelised data")
         # VDIF requires an even number of words per frame
@@ -123,6 +123,7 @@ class VDIFEncode2Bit:
         self.time_scale = input_data.time_scale * self.SAMPLES_PER_WORD
         self.channels = None
         self.is_cupy = input_data.is_cupy
+        self.threshold = threshold
 
     async def __aiter__(self) -> AsyncIterator[xr.DataArray]:
         samples_per_frame = self.samples_per_frame
@@ -145,6 +146,7 @@ class VDIFEncode2Bit:
                 output_core_dims=[("time",)],
                 exclude_dims={"time"},
                 keep_attrs=True,
+                kwargs=dict(threshold=self.threshold),
             )
             assert encoded.attrs["time_bias"] % self.SAMPLES_PER_WORD == 0
             encoded.attrs["time_bias"] //= self.SAMPLES_PER_WORD

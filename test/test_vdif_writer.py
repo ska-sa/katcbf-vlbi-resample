@@ -26,7 +26,7 @@ import numpy as np
 import pytest
 import xarray as xr
 from astropy.time import Time, TimeDelta
-from baseband.base.encoding import OPTIMAL_2BIT_HIGH
+from baseband.base.encoding import OPTIMAL_2BIT_HIGH, TWO_BIT_1_SIGMA
 from baseband.vdif.payload import encode_2bit
 
 from katcbf_vlbi_resample import vdif_writer
@@ -59,7 +59,7 @@ class TestEncode2Bit:
         rng = xp.random.default_rng(seed=2)
         data = rng.uniform(-5.0, 5.0, size=(100000,)).astype(xp.float32)
         expected = encode_2bit(cp.asnumpy(data))
-        actual = vdif_writer._encode_2bit(data)
+        actual = vdif_writer._encode_2bit(data, TWO_BIT_1_SIGMA)
         # Note: values right on the threshold might round differently,
         # but do not currently seem to do so. Changes to cupy's random
         # generator may require adjustments to the test to allow for
@@ -73,16 +73,16 @@ class TestVDIFEncode2Bit:
     def test_bad_samples_per_frame_word_align(self, orig: SimpleStream[xr.DataArray]) -> None:
         """Test that `samples_per_frame` not a multiple of word size raises :exc:`ValueError`."""
         with pytest.raises(ValueError, match="samples_per_frame must be a multiple of 32"):
-            vdif_writer.VDIFEncode2Bit(orig, 160016)
+            vdif_writer.VDIFEncode2Bit(orig, 160016, 1.0)
 
     def test_bad_samples_per_frame_rate(self, orig: SimpleStream[xr.DataArray]) -> None:
         """Test that ValueError is raised if frame rate is not an integer."""
         with pytest.raises(ValueError, match="samples_per_frame does not yield an integer frame rate"):
-            vdif_writer.VDIFEncode2Bit(orig, 160032)
+            vdif_writer.VDIFEncode2Bit(orig, 160032, 1.0)
 
     async def test_success(self, xp, orig: SimpleStream[xr.DataArray], input_data: xr.DataArray) -> None:
         """Test normal usage."""
-        enc = vdif_writer.VDIFEncode2Bit(orig, 160)
+        enc = vdif_writer.VDIFEncode2Bit(orig, 160, 1.0)
         assert enc.time_scale == orig.time_scale * vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
         assert enc.is_cupy == orig.is_cupy
         chunks = [chunk async for chunk in enc]
@@ -97,7 +97,7 @@ class TestVDIFEncode2Bit:
         assert abs(actual_start - expected_start) <= TimeDelta(1e-10, format="sec")
         assert out_data.sizes["time"] == 480 // vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
         used_input_data = input_data.isel(time=xp.s_[23:503])
-        xp.testing.assert_array_equal(out_data.data, vdif_writer._encode_2bit_words(used_input_data.data))
+        xp.testing.assert_array_equal(out_data.data, vdif_writer._encode_2bit_words(used_input_data.data, 1.0))
 
 
 class TestVDIFFormatter:
@@ -145,7 +145,8 @@ class TestVDIFFormatter:
         )
         samples_per_frame = 160
         orig = SimpleStream.factory(time_base, time_scale, data, 100)
-        enc = vdif_writer.VDIFEncode2Bit(orig, samples_per_frame)
+        # TWO_BIT_1_SIGMA gives compatibility with baseband's encoding
+        enc = vdif_writer.VDIFEncode2Bit(orig, samples_per_frame, TWO_BIT_1_SIGMA)
         fmt = vdif_writer.VDIFFormatter(
             enc, [{"pol": "h"}, {"pol": "v"}], station="me", samples_per_frame=samples_per_frame
         )

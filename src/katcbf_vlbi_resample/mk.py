@@ -308,11 +308,10 @@ async def async_main() -> None:  # noqa: D103
         it_rms = RecordPower(it_rms, threads=threads, writer=csv.writer(power_fh))
     else:
         power_fh = None
-    # Normalise the power. The baseband package uses a threshold of
-    # TWO_BIT_1_SIGMA so we have to adjust the level to match.
-    it = power.NormalisePower(it_rms, baseband.base.encoding.TWO_BIT_1_SIGMA / args.threshold, power=args.normalise)
+    # Normalise the power.
+    it = power.NormalisePower(it_rms, 1.0, power=args.normalise)
     # Encode to VDIF
-    it = vdif_writer.VDIFEncode2Bit(it, samples_per_frame=args.samples_per_frame)
+    it = vdif_writer.VDIFEncode2Bit(it, samples_per_frame=args.samples_per_frame, threshold=args.threshold)
     # Transfer back to the CPU if needed
     if is_cupy:
         it = cupy_bridge.AsNumpy(it)
