@@ -175,5 +175,5 @@ urllib3==2.5.0
     # via requests
 virtualenv==20.32.0
     # via pre-commit
-xarray==2025.7.1
+xarray==2026.2.0
     # via katcbf-vlbi-resample (pyproject.toml)
