@@ -153,7 +153,9 @@ class TestVDIFFormatter:
         # Write the data to an in-memory file
         fh = io.BytesIO()
         async for frameset in fmt:
-            frameset.tofile(fh)
+            for frame in frameset:
+                fh.write(frame.header)
+                fh.write(frame.payload)
 
         # Read it back and compare to the original data
         fh.seek(0, 0)

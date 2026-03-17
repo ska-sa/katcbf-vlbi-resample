@@ -326,11 +326,16 @@ async def async_main() -> None:  # noqa: D103
             task_id = progress.add_task("Processing...", total=n_spectra)
             progress_it.set_progress(progress, task_id)
             async for frameset in frameset_it:
-                if fh is None or fh.tell() + frameset.nbytes > args.file_size:
+                nbytes = 0
+                for frame in frameset:
+                    nbytes += frame.header.nbytes + frame.payload.nbytes
+                if fh is None or fh.tell() + nbytes > args.file_size:
                     if fh is not None:
                         fh.close()
                     fh = baseband.vdif.open(next(fns), "wb")
-                frameset.tofile(fh)
+                for frame in frameset:
+                    fh.write(frame.header)
+                    fh.write(frame.payload)
     finally:
         if fh is not None:
             fh.close()
