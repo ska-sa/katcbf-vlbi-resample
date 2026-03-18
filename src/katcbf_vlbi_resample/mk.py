@@ -30,6 +30,7 @@ from typing import Any, BinaryIO, Self
 
 import astropy.units as u
 import baseband.base.encoding
+import baseband.vdif
 import h5py
 import katsdptelstate
 import numpy as np
