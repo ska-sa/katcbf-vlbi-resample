@@ -29,7 +29,6 @@ from dataclasses import dataclass
 from typing import Any, BinaryIO, Self
 
 import astropy.units as u
-import baseband.vdif
 import h5py
 import katsdptelstate
 import numpy as np
@@ -319,7 +318,7 @@ async def async_main() -> None:  # noqa: D103
 
     # The above just sets up an iterator. Now use it to write to file.
     fns = iter(FileNameSequencer(args.output))
-    fh: baseband.vdif.VDIFFileWriter | None = None
+    fh: BinaryIO | None = None
     try:
         with Progress() as progress:
             task_id = progress.add_task("Processing...", total=n_spectra)
@@ -331,7 +330,7 @@ async def async_main() -> None:  # noqa: D103
                 if fh is None or fh.tell() + nbytes > args.file_size:
                     if fh is not None:
                         fh.close()
-                    fh = baseband.vdif.open(next(fns), "wb")
+                    fh = open(next(fns), "wb")
                 for frame in frameset:
                     fh.write(frame.header)
                     fh.write(frame.payload)
