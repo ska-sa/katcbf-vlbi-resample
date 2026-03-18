@@ -30,10 +30,13 @@ from .stream import Stream
 from .utils import concat_time, isel_time, time_align
 
 
+# Note: the caller must pass the inverse of the threshold here. Computing
+# the inverse inside this function would cause it to happen per-element on
+# the GPU (much more expensive) rather than per-array in the Python code.
 @cp.fuse
-def _encode_2bit_prep(values, scale: float):
-    xp = cp.get_array_module(values, scale)
-    return xp.clip(values * scale + 2, 0, 3).astype(np.uint8)
+def _encode_2bit_prep(values, inverse_threshold: float):
+    xp = cp.get_array_module(values)
+    return xp.clip(values * inverse_threshold + 2, 0, 3).astype(np.uint8)
 
 
 def _encode_2bit(values, threshold: float):
