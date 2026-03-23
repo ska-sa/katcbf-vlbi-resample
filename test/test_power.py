@@ -71,6 +71,7 @@ class TestMeasurePower:
             xp.full((2, 10), 4.5),
             dims=("pol", "time"),
             coords={"pol": ["h", "v"]},
+            attrs={"time_bias": 123},
             name="rms",
         )
         expected_rms[0] *= 2
