@@ -1,6 +1,12 @@
 Changelog
 =========
 
+.. rubric:: 0.5
+
+Optimise writing of VDIF frame headers. The headers are now constructed
+directly rather than via the baseband package. This is a breaking change
+to the API for :class:`.VDIFFormatter`.
+
 .. rubric:: 0.4
 
 This release contains **breaking changes** to the internal APIs, but the
