@@ -29,7 +29,6 @@ from dataclasses import dataclass
 from typing import Any, BinaryIO, Self
 
 import astropy.units as u
-import baseband.base.encoding
 import h5py
 import katsdptelstate
 import numpy as np
@@ -308,11 +307,10 @@ async def async_main() -> None:  # noqa: D103
         it_rms = RecordPower(it_rms, threads=threads, writer=csv.writer(power_fh))
     else:
         power_fh = None
-    # Normalise the power. The baseband package uses a threshold of
-    # TWO_BIT_1_SIGMA so we have to adjust the level to match.
-    it = power.NormalisePower(it_rms, baseband.base.encoding.TWO_BIT_1_SIGMA / args.threshold, power=args.normalise)
+    # Normalise the power.
+    it = power.NormalisePower(it_rms, 1.0, power=args.normalise)
     # Encode to VDIF
-    it = vdif_writer.VDIFEncode2Bit(it, samples_per_frame=args.samples_per_frame)
+    it = vdif_writer.VDIFEncode2Bit(it, samples_per_frame=args.samples_per_frame, threshold=args.threshold)
     # Transfer back to the CPU if needed
     if is_cupy:
         it = cupy_bridge.AsNumpy(it)
@@ -320,17 +318,22 @@ async def async_main() -> None:  # noqa: D103
 
     # The above just sets up an iterator. Now use it to write to file.
     fns = iter(FileNameSequencer(args.output))
-    fh: baseband.vdif.VDIFFileWriter | None = None
+    fh: BinaryIO | None = None
     try:
         with Progress() as progress:
             task_id = progress.add_task("Processing...", total=n_spectra)
             progress_it.set_progress(progress, task_id)
             async for frameset in frameset_it:
-                if fh is None or fh.tell() + frameset.nbytes > args.file_size:
+                nbytes = 0
+                for frame in frameset:
+                    nbytes += frame.header.nbytes + frame.payload.nbytes
+                if fh is None or fh.tell() + nbytes > args.file_size:
                     if fh is not None:
                         fh.close()
-                    fh = baseband.vdif.open(next(fns), "wb")
-                frameset.tofile(fh)
+                    fh = open(next(fns), "wb")
+                for frame in frameset:
+                    fh.write(frame.header)
+                    fh.write(frame.payload)
     finally:
         if fh is not None:
             fh.close()

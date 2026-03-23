@@ -26,13 +26,70 @@ import numpy as np
 import pytest
 import xarray as xr
 from astropy.time import Time, TimeDelta
-from baseband.base.encoding import OPTIMAL_2BIT_HIGH
+from baseband.base.encoding import OPTIMAL_2BIT_HIGH, TWO_BIT_1_SIGMA
 from baseband.vdif.payload import encode_2bit
 
 from katcbf_vlbi_resample import vdif_writer
 from katcbf_vlbi_resample.utils import concat_time, fraction_to_time_delta
 
 from . import SimpleStream
+
+
+# astropy warns about times in the distant future (presumably because
+# leap-seconds are not known).
+@pytest.mark.filterwarnings("ignore:.*dubious year.*")
+@pytest.mark.parametrize(
+    "time, ref_time, epoch",
+    [
+        ("2000-01-01 00:00:00", "2000-01-01 00:00:00", 0),
+        ("2015-06-30 23:59:60", "2015-01-01 00:00:00", 30),  # Leap second
+        ("2025-03-02 12:34:56", "2025-01-01 00:00:00", 50),
+        ("2025-09-01 12:34:56", "2025-07-01 00:00:00", 51),
+        ("2032-01-01 00:00:00", "2032-01-01 00:00:00", 64),  # _reference_epoch shouldn't wrap at 6 bits
+    ],
+)
+def test_reference_epoch(time: str, ref_time: str, epoch: int) -> None:
+    """Test :func:`katcbf_vlbi_resample.vdif_writer._reference_epoch."""
+    time_a = Time(time, format="iso", scale="utc")
+    ref_time_a = Time(ref_time, format="iso", scale="utc")
+    assert vdif_writer._reference_epoch(time_a) == (ref_time_a, epoch)
+
+
+def test_make_header() -> None:
+    """Test :func:`katcbf_vlbi_resample.vdif_writer._make_header.
+
+    There is also indirect testing in TestVDIFFormatter which covers cases not
+    tested here (particularly non-numeric station IDs).
+    """
+    header, ref_time = vdif_writer._make_header(
+        bps=2,
+        station=1234,
+        samples_per_frame=96,
+        ref_time=Time("2025-09-01 12:34:56", format="iso", scale="utc"),
+    )
+    assert ref_time == Time("2025-07-01 00:00:00", format="iso", scale="utc")
+    parsed = baseband.vdif.header.VDIFHeader(header)
+    assert parsed.bps == 2
+    assert parsed.station == 1234
+    assert parsed.samples_per_frame == 96
+    assert parsed["ref_epoch"] == 51
+    # Check that fields that are meant to be blank in fact are
+    assert parsed["thread_id"] == 0
+    assert parsed["seconds"] == 0
+    assert parsed["frame_nr"] == 0
+
+
+def test_make_header_bad() -> None:
+    """Test exception handling in :func:`katcbf_vlbi_resample.vdif_writer._make_header`."""
+    ref_time = Time("2025-09-01 12:34:56", format="iso", scale="utc")
+    with pytest.raises(ValueError, match="bits/sample does not fit in the 5-bit VDIF header field"):
+        vdif_writer._make_header(bps=33, station="me", samples_per_frame=256, ref_time=ref_time)
+    with pytest.raises(ValueError, match="numeric station ID is out of range"):
+        vdif_writer._make_header(bps=2, station=-1, samples_per_frame=96, ref_time=ref_time)
+    with pytest.raises(ValueError, match="numeric station ID is out of range"):
+        vdif_writer._make_header(bps=2, station=0x3000, samples_per_frame=96, ref_time=ref_time)
+    with pytest.raises(ValueError, match="samples_per_frame does not yield a whole number of 8-byte units"):
+        vdif_writer._make_header(bps=3, station="me", samples_per_frame=96, ref_time=ref_time)
 
 
 @pytest.fixture
@@ -59,7 +116,7 @@ class TestEncode2Bit:
         rng = xp.random.default_rng(seed=2)
         data = rng.uniform(-5.0, 5.0, size=(100000,)).astype(xp.float32)
         expected = encode_2bit(cp.asnumpy(data))
-        actual = vdif_writer._encode_2bit(data)
+        actual = vdif_writer._encode_2bit(data, TWO_BIT_1_SIGMA)
         # Note: values right on the threshold might round differently,
         # but do not currently seem to do so. Changes to cupy's random
         # generator may require adjustments to the test to allow for
@@ -73,16 +130,16 @@ class TestVDIFEncode2Bit:
     def test_bad_samples_per_frame_word_align(self, orig: SimpleStream[xr.DataArray]) -> None:
         """Test that `samples_per_frame` not a multiple of word size raises :exc:`ValueError`."""
         with pytest.raises(ValueError, match="samples_per_frame must be a multiple of 32"):
-            vdif_writer.VDIFEncode2Bit(orig, 160016)
+            vdif_writer.VDIFEncode2Bit(orig, 160016, 1.0)
 
     def test_bad_samples_per_frame_rate(self, orig: SimpleStream[xr.DataArray]) -> None:
         """Test that ValueError is raised if frame rate is not an integer."""
         with pytest.raises(ValueError, match="samples_per_frame does not yield an integer frame rate"):
-            vdif_writer.VDIFEncode2Bit(orig, 160032)
+            vdif_writer.VDIFEncode2Bit(orig, 160032, 1.0)
 
     async def test_success(self, xp, orig: SimpleStream[xr.DataArray], input_data: xr.DataArray) -> None:
         """Test normal usage."""
-        enc = vdif_writer.VDIFEncode2Bit(orig, 160)
+        enc = vdif_writer.VDIFEncode2Bit(orig, 160, 1.0)
         assert enc.time_scale == orig.time_scale * vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
         assert enc.is_cupy == orig.is_cupy
         chunks = [chunk async for chunk in enc]
@@ -97,7 +154,7 @@ class TestVDIFEncode2Bit:
         assert abs(actual_start - expected_start) <= TimeDelta(1e-10, format="sec")
         assert out_data.sizes["time"] == 480 // vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
         used_input_data = input_data.isel(time=xp.s_[23:503])
-        xp.testing.assert_array_equal(out_data.data, vdif_writer._encode_2bit_words(used_input_data.data))
+        xp.testing.assert_array_equal(out_data.data, vdif_writer._encode_2bit_words(used_input_data.data, 1.0))
 
 
 class TestVDIFFormatter:
@@ -145,7 +202,8 @@ class TestVDIFFormatter:
         )
         samples_per_frame = 160
         orig = SimpleStream.factory(time_base, time_scale, data, 100)
-        enc = vdif_writer.VDIFEncode2Bit(orig, samples_per_frame)
+        # TWO_BIT_1_SIGMA gives compatibility with baseband's encoding
+        enc = vdif_writer.VDIFEncode2Bit(orig, samples_per_frame, TWO_BIT_1_SIGMA)
         fmt = vdif_writer.VDIFFormatter(
             enc, [{"pol": "h"}, {"pol": "v"}], station="me", samples_per_frame=samples_per_frame
         )
@@ -153,7 +211,9 @@ class TestVDIFFormatter:
         # Write the data to an in-memory file
         fh = io.BytesIO()
         async for frameset in fmt:
-            frameset.tofile(fh)
+            for frame in frameset:
+                fh.write(frame.header)
+                fh.write(frame.payload)
 
         # Read it back and compare to the original data
         fh.seek(0, 0)
@@ -164,6 +224,9 @@ class TestVDIFFormatter:
             assert vdif_data.shape == data.shape[::-1]
             assert vdif_data.sample_shape == (2,)
             assert (vdif_data.start_time - time_base).sec == pytest.approx(0.002, abs=1e-10)
+            # For some reason baseband only exposes this as a key, not an attribute
+            assert vdif_data.header0["vdif_version"] == 1
+            assert vdif_data.header0.nchan == 1
             assert vdif_data.header0.station == "me"
             out_data = xr.DataArray(
                 vdif_data.read(),

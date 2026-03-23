@@ -17,50 +17,78 @@
 """Encode data to VDIF frames."""
 
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from fractions import Fraction
 from typing import Any, Final
 
 import cupy as cp
 import numpy as np
 import xarray as xr
-from astropy.time import TimeDelta
-from baseband.base.encoding import TWO_BIT_1_SIGMA
-from baseband.vdif import VDIFFrame, VDIFFrameSet, VDIFHeader, VDIFPayload
+from astropy.time import Time, TimeDelta
 
 from .stream import Stream
 from .utils import concat_time, isel_time, time_align
 
 
+# Note: the caller must pass the inverse of the threshold here. Computing
+# the inverse inside this function would cause it to happen per-element on
+# the GPU (much more expensive) rather than per-array in the Python code.
 @cp.fuse
-def _encode_2bit_prep(values):
+def _encode_2bit_prep(values, inverse_threshold: float):
     xp = cp.get_array_module(values)
-    return xp.clip(values * (1 / TWO_BIT_1_SIGMA) + 2, 0, 3).astype(np.uint8)
+    return xp.clip(values * inverse_threshold + 2, 0, 3).astype(np.uint8)
 
 
-def _encode_2bit(values):
+def _encode_2bit(values, threshold: float):
     """Encode values using 2 bits per value, packing the result into bytes.
 
-    This is equivalent to :func:`baseband.vdif.encode_2bit`, but supports
-    cupy. Note that values very close to the threshold might round
-    differently.
+    This is equivalent to :func:`baseband.vdif.encode_2bit` but it supports a
+    custom threshold and cupy. Note that values very close to the threshold
+    might round differently.
     """
     xp = cp.get_array_module(values)
-    values = _encode_2bit_prep(values)
+    values = _encode_2bit_prep(values, 1.0 / threshold)
     values = values.reshape(values.shape[:-1] + (-1, 4))
     values <<= xp.arange(0, 8, 2, dtype=np.uint8)
     # cupy doesn't currently support np.bitwise_or.reduce
     return values[..., 0] | values[..., 1] | values[..., 2] | values[..., 3]
 
 
-def _encode_2bit_words(values):
-    return _encode_2bit(values).view("<u4")
+def _encode_2bit_words(values, threshold: float):
+    return _encode_2bit(values, threshold).view("<u4")
+
+
+def _reference_epoch(time: Time) -> tuple[Time, int]:
+    """Compute the VDIF reference epoch to use.
+
+    VDIF has a reference epoch every 6 months, with 0 corresponding to
+    00:00:00 UTC on 1 Jan 2000. This function will pick the latest
+    reference epoch prior to (or equal to) `time`.
+
+    Returns
+    -------
+    ref_time
+        The UTC time corresponding to the chosen reference epoch.
+    epoch
+        Index of the epoch. It is *not* truncated to 6 bits.
+    """
+    t = time.utc.ymdhms
+    if t.year < 2000:
+        raise ValueError("Times before 2000 cannot be used with VDIF")
+    epoch = (t.year - 2000) * 2
+    ref_month = 1
+    if t.month >= 7:
+        epoch += 1
+        ref_month = 7
+    return Time(dict(year=t.year, month=ref_month, day=1), scale="utc"), epoch
 
 
 class VDIFEncode2Bit:
     """Quantise and pack values to 2-bit samples.
 
-    The power levels must have already been adjusted such that :mod:`baseband`
-    will quantise correctly.
+    Values are quantised by comparing the absolute value to `threshold`.
+    The power levels must already have been adjusted to make this an
+    threshold appropriate.
 
     The output array is in units of VDIF words (32-bit little-endian) rather
     than samples, and `time_bias` is also in units of words. Only real-valued
@@ -75,7 +103,7 @@ class VDIFEncode2Bit:
 
     SAMPLES_PER_WORD: Final = 16
 
-    def __init__(self, input_data: Stream[xr.DataArray], samples_per_frame: int) -> None:
+    def __init__(self, input_data: Stream[xr.DataArray], samples_per_frame: int, threshold: float) -> None:
         if input_data.channels is not None:
             raise ValueError("VDIFEncoder2Bit currently only supports unchannelised data")
         # VDIF requires an even number of words per frame
@@ -98,8 +126,9 @@ class VDIFEncode2Bit:
         self.time_scale = input_data.time_scale * self.SAMPLES_PER_WORD
         self.channels = None
         self.is_cupy = input_data.is_cupy
+        self.threshold = threshold
 
-    async def __aiter__(self) -> AsyncIterator[VDIFFrameSet]:
+    async def __aiter__(self) -> AsyncIterator[xr.DataArray]:
         samples_per_frame = self.samples_per_frame
         buffer = None
         async for in_data in self._input_it:
@@ -120,6 +149,7 @@ class VDIFEncode2Bit:
                 output_core_dims=[("time",)],
                 exclude_dims={"time"},
                 keep_attrs=True,
+                kwargs=dict(threshold=self.threshold),
             )
             assert encoded.attrs["time_bias"] % self.SAMPLES_PER_WORD == 0
             encoded.attrs["time_bias"] //= self.SAMPLES_PER_WORD
@@ -127,6 +157,48 @@ class VDIFEncode2Bit:
             # Cut off the piece that's been processed
             skip = n_frames * samples_per_frame
             buffer = isel_time(buffer, np.s_[skip:])
+
+
+@dataclass
+class VDIFFrame:
+    """Combines a VDIF header and payload in a data class."""
+
+    header: np.ndarray
+    payload: np.ndarray
+
+
+def _make_header(
+    *,
+    bps: int,
+    station: str | int,
+    samples_per_frame: int,
+    ref_time: Time,
+) -> tuple[np.ndarray, Time]:
+    """Generate a template of the VDIF header, without per-frame timing data."""
+
+    def field(name: str, word: int, offset: int, bits: int, value: int) -> None:
+        assert offset + bits <= 32
+        if value >= 1 << bits:
+            raise ValueError(f"{name} does not fit in the {bits}-bit VDIF header field")
+        header[word] |= value << offset
+
+    header = np.zeros(8, "<u4")
+    ref_time, epoch = _reference_epoch(ref_time)
+    epoch &= 0x3F  # VDIF only uses the bottom 6 bits, wrapping in 2032
+    field("ref epoch", 1, 24, 6, epoch)
+    if samples_per_frame * bps % 64 != 0:
+        raise ValueError("samples_per_frame does not yield a whole number of 8-byte units")
+    field("data frame length", 2, 0, 24, samples_per_frame * bps // 64 + 4)
+    field("version", 2, 29, 3, 1)
+    if isinstance(station, int):
+        if station < 0 or station >= 0x3000:
+            raise ValueError("numeric station ID is out of range")
+        field("station ID", 3, 0, 16, station)
+    else:
+        # TODO: check that it's ASCII and the first character is >= '0'
+        field("station ID", 3, 0, 16, (ord(station[0]) << 8) | ord(station[1]))
+    field("bits/sample", 3, 26, 5, bps - 1)
+    return header, ref_time
 
 
 class VDIFFormatter:
@@ -156,15 +228,13 @@ class VDIFFormatter:
         if samples_per_frame % (2 * VDIFEncode2Bit.SAMPLES_PER_WORD) != 0:
             raise ValueError(f"samples_per_frame must be a multiple of {2 * VDIFEncode2Bit.SAMPLES_PER_WORD}")
         self._input_it = aiter(input_data)
-        self._header = VDIFHeader.fromvalues(
+        self._header, ref_time = _make_header(
             bps=2,
-            complex_data=False,
-            nchan=1,
             station=station,
             samples_per_frame=samples_per_frame,
             ref_time=input_data.time_base,
-            edv=0,
         )
+        self._samples_per_frame = samples_per_frame
         self._threads = threads
         words_per_frame = samples_per_frame // VDIFEncode2Bit.SAMPLES_PER_WORD
         frame_rate = 1 / (words_per_frame * input_data.time_scale)
@@ -172,7 +242,7 @@ class VDIFFormatter:
             raise ValueError("samples_per_frame does not yield an integer frame rate")
         self._frame_rate = int(frame_rate)
         #: Number of VDIF seconds corresponding to a time_bias of 0
-        base_seconds = (input_data.time_base - self._header.ref_time).sec
+        base_seconds = (input_data.time_base - ref_time).sec
         self._base_seconds = round(base_seconds)
         if abs(base_seconds - self._base_seconds) > 1e-8:
             raise ValueError("time_base was not aligned to a second boundary")
@@ -182,26 +252,19 @@ class VDIFFormatter:
         self.channels = None
         self.is_cupy = False
 
-    def _frame(self, thread_id: int, header: VDIFHeader, frame_data: np.ndarray) -> VDIFFrame:
+    def _frame(self, thread_id: int, header: np.ndarray, frame_data: np.ndarray) -> VDIFFrame:
         header = header.copy()
-        header.update(thread_id=thread_id)
-        return VDIFFrame(
-            header,
-            VDIFPayload(frame_data, header),
-        )
+        header[3] |= thread_id << 16
+        return VDIFFrame(header, frame_data)
 
-    def _frame_set(self, frame: int, frame_data: list[np.ndarray]) -> VDIFFrameSet:
+    def _frame_set(self, frame: int, frame_data: list[np.ndarray]) -> list[VDIFFrame]:
         header = self._header.copy()
-        header.update(
-            seconds=self._base_seconds + frame // self._frame_rate,
-            frame_nr=frame % self._frame_rate,
-        )
+        header[0] = self._base_seconds + frame // self._frame_rate
+        header[1] |= frame % self._frame_rate
+        return [self._frame(i, header, thread) for i, thread in enumerate(frame_data)]
 
-        frames = [self._frame(i, header, thread) for i, thread in enumerate(frame_data)]
-        return VDIFFrameSet(frames, header)
-
-    async def __aiter__(self) -> AsyncIterator[VDIFFrameSet]:
-        words_per_frame = self._header.samples_per_frame // VDIFEncode2Bit.SAMPLES_PER_WORD
+    async def __aiter__(self) -> AsyncIterator[list[VDIFFrame]]:
+        words_per_frame = self._samples_per_frame // VDIFEncode2Bit.SAMPLES_PER_WORD
         async for buffer in self._input_it:
             n_frames = buffer.sizes["time"] // words_per_frame
             # xarray's overheads are too high to use it on a per-frame basis.
