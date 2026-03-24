@@ -3,9 +3,13 @@ Changelog
 
 .. rubric:: 0.5
 
-Optimise writing of VDIF frame headers. The headers are now constructed
-directly rather than via the baseband package. This is a breaking change
-to the API for :class:`.VDIFFormatter`.
+- Optimise writing of VDIF frame headers. The headers are now constructed
+  directly rather than via the baseband package. This is a breaking change
+  to the API for :class:`.VDIFFormatter`.
+- Fix unit tests with ``xarray>=2025.11.0``. This also makes the functional
+  change that the Datasets emitted from :class:`.MeasurePower` will now have
+  the ``time_bias`` attribute. To ensure consistent behaviour, this is now
+  made the minimum xarray version.
 
 .. rubric:: 0.4
 
