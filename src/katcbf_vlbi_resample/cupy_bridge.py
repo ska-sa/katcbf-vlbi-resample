@@ -79,7 +79,12 @@ class AsNumpy:
             out = cupyx.empty_like_pinned(buffer.data)
             buffer = buffer.copy(data=cp.asnumpy(buffer.data, out=out, blocking=False))
             self._queue.append(stream_future(buffer))
-            async for chunk in self._flush(self._queue_depth):
+            async for _chunk in self._flush(self._queue_depth):
+                chunk = _chunk
                 yield chunk
-        async for chunk in self._flush(0):
+                del chunk, _chunk
+
+        async for _chunk in self._flush(0):
+            chunk = _chunk
             yield chunk
+            del chunk, _chunk

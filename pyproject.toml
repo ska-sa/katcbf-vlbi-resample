@@ -66,8 +66,8 @@ doc = [
     "sphinx",
     "sphinx-rtd-theme",
 ]
-cuda12x = [
-    "cupy-cuda12x"
+cuda13x = [
+    "cupy-cuda13x"
 ]
 
 [project.scripts]
