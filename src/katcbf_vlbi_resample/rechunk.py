@@ -90,7 +90,8 @@ class Rechunk:
         """Split input chunks on samples_per_chunk boundaries."""
         samples_per_chunk = self.samples_per_chunk
         remainder = self.remainder
-        async for input_chunk in self._input_it:
+        async for _input_chunk in self._input_it:
+            input_chunk = _input_chunk
             start: int = input_chunk.attrs["time_bias"]
             stop = start + input_chunk.sizes["time"]
             # boundary > start and aligned to samples_per_chunk
@@ -102,6 +103,7 @@ class Rechunk:
                 boundary += samples_per_chunk
             if last < stop:
                 yield isel_time(input_chunk, np.s_[last - start : stop - start])
+            del input_chunk, _input_chunk
 
     async def __aiter__(self) -> AsyncIterator[xr.DataArray]:
         buffer: xr.DataArray | None = None
@@ -133,7 +135,8 @@ class Rechunk:
             buffer.attrs["time_bias"] = buffer_base  # type: ignore
 
         xp = cp if self.is_cupy else np
-        async for input_chunk in self._split_input():
+        async for _input_chunk in self._split_input():
+            input_chunk = _input_chunk
             chunk_start = input_chunk.attrs["time_bias"]
             chunk_size = input_chunk.sizes["time"]
             if chunk_size == 0:
@@ -167,8 +170,13 @@ class Rechunk:
                 buffer_stop += chunk_size
                 if buffer_stop == samples_per_chunk:
                     # We've reached the end of a chunk
-                    for chunk in yield_buffer():
+                    for _chunk in yield_buffer():
+                        chunk = _chunk
                         yield chunk
+                        del chunk, _chunk
+            del input_chunk, _input_chunk
 
-        for chunk in yield_buffer():  # Deal with any trailing piece
+        for _chunk in yield_buffer():  # Deal with any trailing piece
+            chunk = _chunk
             yield chunk
+            del chunk, _chunk
