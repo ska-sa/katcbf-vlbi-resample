@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2024-2025, National Research Foundation (SARAO)
+# Copyright (c) 2024-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -268,14 +268,15 @@ class VDIFFormatter:
 
     async def __aiter__(self) -> AsyncIterator[list[VDIFFrame]]:
         words_per_frame = self._samples_per_frame // VDIFEncode2Bit.SAMPLES_PER_WORD
-        async for buffer in self._input_it:
+        async for _buffer in self._input_it:
+            buffer = _buffer
             n_frames = buffer.sizes["time"] // words_per_frame
             # xarray's overheads are too high to use it on a per-frame basis.
             # Turn the buffer into a plain ol' numpy array (thread × time).
             raw_data = [buffer.sel(thread_idx).to_numpy() for thread_idx in self._threads]
             assert all(data.ndim == 1 for data in raw_data)
             start_frame = int(buffer[0].attrs["time_bias"] * self._frame_rate * self.time_scale)
-            del buffer
+            del buffer, _buffer
             for i in range(n_frames):
                 word_start = i * words_per_frame
                 word_stop = (i + 1) * words_per_frame
