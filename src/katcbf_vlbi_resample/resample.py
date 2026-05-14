@@ -313,7 +313,10 @@ class Resample:
                 if buffer is None:
                     continue  # We've trimmed the entire input chunk
             else:
+                _input_chunk = input_chunk
                 buffer = concat_time([buffer, input_chunk])
+                del _input_chunk, input_chunk
+
             n_time = buffer.sizes["time"]
             # Determine first invalid sample. Output sample x takes taps up to
             # upsampled sample x*d (inclusive). This must be strictly less
