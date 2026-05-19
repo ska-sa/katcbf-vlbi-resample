@@ -131,8 +131,7 @@ class VDIFEncode2Bit:
     async def __aiter__(self) -> AsyncIterator[xr.DataArray]:
         samples_per_frame = self.samples_per_frame
         buffer = None
-        async for _in_data in self._input_it:
-            in_data = _in_data
+        async for in_data in self._input_it:
             in_data.attrs["time_bias"] += self._shift_samples
             if buffer is None:
                 # Discard leading partial frame.
@@ -141,7 +140,7 @@ class VDIFEncode2Bit:
                     continue  # Don't have enough data to reach the frame boundary
             else:
                 buffer = concat_time([buffer, in_data])
-            del in_data, _in_data
+            del in_data
 
             n_frames = buffer.sizes["time"] // samples_per_frame
             encoded = xr.apply_ufunc(
@@ -268,15 +267,14 @@ class VDIFFormatter:
 
     async def __aiter__(self) -> AsyncIterator[list[VDIFFrame]]:
         words_per_frame = self._samples_per_frame // VDIFEncode2Bit.SAMPLES_PER_WORD
-        async for _buffer in self._input_it:
-            buffer = _buffer
+        async for buffer in self._input_it:
             n_frames = buffer.sizes["time"] // words_per_frame
             # xarray's overheads are too high to use it on a per-frame basis.
             # Turn the buffer into a plain ol' numpy array (thread × time).
             raw_data = [buffer.sel(thread_idx).to_numpy() for thread_idx in self._threads]
             assert all(data.ndim == 1 for data in raw_data)
             start_frame = int(buffer[0].attrs["time_bias"] * self._frame_rate * self.time_scale)
-            del buffer, _buffer
+            del buffer
             for i in range(n_frames):
                 word_start = i * words_per_frame
                 word_stop = (i + 1) * words_per_frame
