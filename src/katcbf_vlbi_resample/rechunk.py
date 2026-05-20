@@ -102,6 +102,7 @@ class Rechunk:
                 boundary += samples_per_chunk
             if last < stop:
                 yield isel_time(input_chunk, np.s_[last - start : stop - start])
+            del input_chunk
 
     async def __aiter__(self) -> AsyncIterator[xr.DataArray]:
         buffer: xr.DataArray | None = None
@@ -169,6 +170,9 @@ class Rechunk:
                     # We've reached the end of a chunk
                     for chunk in yield_buffer():
                         yield chunk
+                        del chunk
+            del input_chunk
 
         for chunk in yield_buffer():  # Deal with any trailing piece
             yield chunk
+            del chunk

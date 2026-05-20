@@ -81,5 +81,8 @@ class AsNumpy:
             self._queue.append(stream_future(buffer))
             async for chunk in self._flush(self._queue_depth):
                 yield chunk
+                del chunk
+
         async for chunk in self._flush(0):
             yield chunk
+            del chunk
