@@ -1,6 +1,10 @@
 Changelog
 =========
 
+.. rubric:: 0.5.1
+
+- Reduce GPU memory usage.
+
 .. rubric:: 0.5
 
 - Optimise writing of VDIF frame headers. The headers are now constructed
