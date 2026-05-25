@@ -1,6 +1,10 @@
 Changelog
 =========
 
+.. rubric:: 0.5.2
+
+- Further reduce GPU memory usage.
+
 .. rubric:: 0.5.1
 
 - Reduce GPU memory usage.
