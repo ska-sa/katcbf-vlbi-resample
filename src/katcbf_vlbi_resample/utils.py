@@ -31,12 +31,22 @@ def concat_time(arrays: Sequence[xr.DataArray]) -> xr.DataArray:
 
     This checks that the arrays are contiguous in time and fixes up the
     timestamping attribute.
+
+    It also has a fast path if there is only one non-empty array in
+    the sequence, in which case that array is returned without making
+    a copy. Note that this means that the original arrays cannot safely
+    be modified, as it will affect the return value.
     """
     n = 0
+    non_empty = []
     for array in arrays:
         if array.attrs["time_bias"] != arrays[0].attrs["time_bias"] + n:
             raise ValueError("Chunks are not contiguous in time")
+        if array.sizes["time"] != 0:
+            non_empty.append(array)
         n += array.sizes["time"]
+    if len(non_empty) == 1:
+        return non_empty[0]
     # Simply using xr.concat is slow because it builds an index on the
     # concatenated axis. This is hacky and will probably lose coordinates
     # in the general case, but is sufficient for the uses in this library.

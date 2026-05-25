@@ -156,9 +156,10 @@ class VDIFEncode2Bit:
             encoded.attrs["time_bias"] //= self.SAMPLES_PER_WORD
             yield encoded
             del encoded
-            # Cut off the piece that's been processed
+            # Cut off the piece that's been processed. We then copy the
+            # tail piece so that the bulk of the memory can be freed.
             skip = n_frames * samples_per_frame
-            buffer = isel_time(buffer, np.s_[skip:])
+            buffer = isel_time(buffer, np.s_[skip:]).copy()
 
 
 @dataclass

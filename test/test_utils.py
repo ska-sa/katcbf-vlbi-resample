@@ -58,6 +58,16 @@ class TestConcatTime:
             attrs={"time_bias": 38},
         )
 
+    @pytest.fixture
+    def empty_array(self, xp) -> xr.DataArray:
+        """Create an array with zero length on the time axis."""
+        return xr.DataArray(
+            xp.zeros((0, 2), dtype=xp.uint8),
+            dims=("time", "pol"),
+            coords={"pol": ["h", "v"]},
+            attrs={"time_bias": 38},
+        )
+
     def test_success(self, xp, array1: xr.DataArray, array2: xr.DataArray) -> None:
         """Test the normal usage path."""
         out = concat_time([array1, array2])
@@ -68,6 +78,11 @@ class TestConcatTime:
             out.data,
             [[10, 11, 12, 13, 14, 1, 1, 1], [15, 16, 17, 18, 19, 1, 1, 1]],
         )
+
+    def test_return_view(self, xp, array2: xr.DataArray, empty_array: xr.DataArray) -> None:
+        """Test the fast path that returns an input array if it is the only non-empty one."""
+        out = concat_time([empty_array, array2])
+        assert out is array2
 
     def test_non_contiguous(self, array1: xr.DataArray, array2: xr.DataArray) -> None:
         """Test that an exception is raised if the `time_bias` fields are inconsistent."""
