@@ -68,7 +68,6 @@ doc = [
 ]
 cuda13x = [
     "cupy-cuda13x",
-    "nvidia-nvjitlink"
 ]
 
 [project.scripts]

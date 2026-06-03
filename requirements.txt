@@ -75,8 +75,6 @@ numpy==2.4.4
     #   pyerfa
     #   scipy
     #   xarray
-nvidia-nvjitlink==13.3.33
-    # via katcbf-vlbi-resample (pyproject.toml)
 packaging==26.2
     # via
     #   katcbf-vlbi-resample (pyproject.toml)
