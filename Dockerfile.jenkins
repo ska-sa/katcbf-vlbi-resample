@@ -30,8 +30,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     libc6-dev \
     libcublas-13-2 \
     libcufft-13-2 \
-    libnvjitlink-13-2 \
     libcusparse-13-2 \
+    libnvjitlink-13-2 \
     libpython3-dev \
     make \
     python3 \
