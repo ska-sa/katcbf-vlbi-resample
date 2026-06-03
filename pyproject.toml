@@ -67,7 +67,8 @@ doc = [
     "sphinx-rtd-theme",
 ]
 cuda13x = [
-    "cupy-cuda13x"
+    "cupy-cuda13x",
+    "nvidia-nvjitlink"
 ]
 
 [project.scripts]
