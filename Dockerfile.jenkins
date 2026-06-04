@@ -18,18 +18,20 @@
 # the Jenkinsfile in this directory. It is not intended for production use,
 # and contains only the portions that need to be run as root.
 
-FROM nvidia/cuda:12.5.1-base-ubuntu24.04
+FROM nvidia/cuda:13.2.1-base-ubuntu24.04
 
 # git is needed for setuptools-scm
 # make is needed for sphinx build
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    cuda-cudart-dev-12-5 \
-    cuda-nvrtc-12-5 \
+    cuda-cudart-dev-13-2 \
+    cuda-nvrtc-13-2 \
     gcc \
     git \
     libc6-dev \
-    libcublas-12-5 \
-    libcufft-12-5 \
+    libcublas-13-2 \
+    libcufft-13-2 \
+    libcusparse-13-2 \
+    libnvjitlink-13-2 \
     libpython3-dev \
     make \
     python3 \

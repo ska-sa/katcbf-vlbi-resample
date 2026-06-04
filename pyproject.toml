@@ -69,6 +69,9 @@ doc = [
 cuda12x = [
     "cupy-cuda12x"
 ]
+cuda13x = [
+    "cupy-cuda13x"
+]
 
 [project.scripts]
 "mk_vlbi_resample" = "katcbf_vlbi_resample.mk:main"

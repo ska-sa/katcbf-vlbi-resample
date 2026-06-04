@@ -40,7 +40,7 @@ repos:
           - "--extra=cli"
           - "--extra=dev"
           - "--extra=doc"
-          - "--extra=cuda12x"
+          - "--extra=cuda13x"
           - "--python-version=3.12"
           - "pyproject.toml"
         files: '^(pyproject\.toml|requirements\.txt)$'
