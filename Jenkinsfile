@@ -19,6 +19,8 @@ pipeline {
     dockerfile {
       registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
       filename 'Dockerfile.jenkins'
+      // Label the built image to assist with garbage collection
+      additionalBuildArgs "--label=za.ac.kat.dpp.jenkins.build=${env.BUILD_ID}"
       args '--runtime=nvidia --gpus=all'
       label 'katgpucbf'
     }
