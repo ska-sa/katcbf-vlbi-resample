@@ -254,6 +254,8 @@ class TestVDIFFormatter:
             coords={"pol": ["v", "h"]},
             attrs={"time_bias": 320},
         )
+        if not is_cupy(dataarr):
+            pytest.skip("Only cupy is supported for benchmarking")
 
         samples_per_chunk = round(sample_rate)
 
