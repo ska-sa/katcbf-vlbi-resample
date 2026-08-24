@@ -27,7 +27,7 @@ from astropy.time import Time
 @pytest.fixture
 def time_base() -> Time:
     """Time base for input stream."""
-    return Time("2024-07-20T12:00:00.25", scale="utc")
+    return Time("2024-07-20T12:00:01.25", scale="utc")
 
 
 @pytest.fixture

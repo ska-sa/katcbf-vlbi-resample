@@ -18,6 +18,7 @@
 
 import io
 from fractions import Fraction
+import time
 
 import astropy.units as u
 import baseband.vdif
@@ -30,7 +31,7 @@ from baseband.base.encoding import OPTIMAL_2BIT_HIGH, TWO_BIT_1_SIGMA
 from baseband.vdif.payload import encode_2bit
 
 from katcbf_vlbi_resample import vdif_writer
-from katcbf_vlbi_resample.utils import concat_time, fraction_to_time_delta
+from katcbf_vlbi_resample.utils import concat_time, fraction_to_time_delta, is_cupy
 
 from . import SimpleStream
 
@@ -236,3 +237,81 @@ class TestVDIFFormatter:
             # Align out_data to match the axes of data
             out_data = out_data.reindex_like(data).transpose(*data.dims)
             xr.testing.assert_equal(out_data, data.as_numpy())
+
+    async def test_benchmark(self, xp, time_base: Time) -> None:
+        """Test performance."""
+        rng = np.random.default_rng(seed=1)
+        sample_rate = 128000000
+
+        dataarr = xr.DataArray(
+            xp.asarray(
+                rng.choice(
+                    np.array([-OPTIMAL_2BIT_HIGH, -1.0, 1.0, OPTIMAL_2BIT_HIGH], np.float32),
+                    size=(2, sample_rate * 3),
+                ),
+            ),
+            dims=("pol", "time"),
+            coords={"pol": ["v", "h"]},
+            attrs={"time_bias": 320},
+        )
+
+        samples_per_chunk = round(sample_rate)
+
+        encode = await self.benchmark_helper_VDIFEncode2Bit(xp, time_base, Fraction(1, sample_rate), dataarr, samples_per_chunk, sample_rate)
+        formatter = await self.benchmark_helper_VDIFFormatter(xp, time_base, Fraction(1, sample_rate), dataarr, samples_per_chunk, sample_rate)
+        assert (encode or formatter), f"Encoder and formatter failed"
+        assert (encode), f"Formatter passed but encoder failed"
+        assert (formatter), f"Encoder passed but formatter failed"
+
+    async def benchmark_helper_VDIFEncode2Bit(self, xp, time_base: Time, time_scale: Fraction, dataarr: xr.DataArray, chunk_size: int, sample_rate: int) -> bool:
+        """Test performance."""
+
+        samples_per_frame = 20000
+        orig = SimpleStream.factory(time_base, time_scale, dataarr, chunk_size)
+        # pre-compute the dataarray for the encoder
+        enc = vdif_writer.VDIFEncode2Bit(orig, samples_per_frame, TWO_BIT_1_SIGMA)  # chunks sized by chunk_size, not samples_per_frame!
+
+        time_start = time.time()
+
+        chunks = 0
+        async for _ in enc:
+            chunks += 1
+
+        end_time = time.time()
+        print(f"Time taken: {end_time - time_start} seconds")
+        print(f"Expected time: {(chunks * chunk_size) / (sample_rate) * 0.9} seconds")
+        assert (chunk_size) / (sample_rate) * 0.9 < 1
+        assert chunks > 1
+        return (end_time - time_start) < (chunks * chunk_size) / (sample_rate) * 0.9
+
+    async def benchmark_helper_VDIFFormatter(self, xp, time_base: Time, time_scale: Fraction, dataarr: xr.DataArray, chunk_size: int, sample_rate: int) -> bool:
+        """Test performance."""
+
+        samples_per_frame = 20000
+        orig = SimpleStream.factory(time_base, time_scale, dataarr, chunk_size)
+        # pre-compute the dataarray for the encoder
+        enc = vdif_writer.VDIFEncode2Bit(orig, samples_per_frame, TWO_BIT_1_SIGMA)  # chunks sized by chunk_size, not samples_per_frame!
+        enc_stream = SimpleStream(
+            time_base=enc.time_base,
+            time_scale=enc.time_scale,
+            chunks=[chunk async for chunk in enc],
+            is_cupy=is_cupy(dataarr),
+            channels=dataarr.sizes.get("channel"),
+        )
+
+        fmt = vdif_writer.VDIFFormatter(
+            enc_stream, [{"pol": "h"}, {"pol": "v"}], station="me", samples_per_frame=samples_per_frame  # some frames per chunk
+        )
+
+        time_start = time.time()
+
+        frames = 0
+        async for framesets in fmt:
+            frames += len(framesets)
+
+        end_time = time.time()
+        assert frames > 2
+        print(f"Time taken: {end_time - time_start} seconds")
+        print(f"Expected time: {(frames * samples_per_frame) / (sample_rate) * 0.9} seconds")
+        assert (samples_per_frame) / (sample_rate) * 0.9 < 0.2
+        return (end_time - time_start) < (frames * samples_per_frame) / (sample_rate) * 0.9
