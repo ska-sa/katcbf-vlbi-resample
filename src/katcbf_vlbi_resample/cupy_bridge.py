@@ -61,23 +61,40 @@ class AsCupy(ChunkwiseStream[xr.DataArray, xr.DataArray]):
 class AsNumpy:
     """Transfer a stream from cupy to numpy."""
 
-    def __init__(self, input_data: Stream[xr.DataArray], queue_depth: int = 1) -> None:
+    def __init__(
+        self,
+        input_data: Stream[xr.DataArray | xr.Dataset],
+        queue_depth: int = 1,
+        is_dataset: bool = False,
+    ) -> None:
         self.time_base = input_data.time_base
         self.time_scale = input_data.time_scale
         self.channels = input_data.channels
         self.is_cupy = False
+        self.is_dataset = is_dataset
         self._input_it = aiter(input_data)
-        self._queue: deque[asyncio.Future[xr.DataArray]] = deque()
+        self._queue: deque[asyncio.Future[xr.DataArray | xr.Dataset]] = deque()
         self._queue_depth = queue_depth
 
-    async def _flush(self, max_size: int) -> AsyncIterator[xr.DataArray]:
+    async def _flush(self, max_size: int) -> AsyncIterator[xr.DataArray | xr.Dataset]:
         while len(self._queue) > max_size:
             yield (await self._queue.popleft())
 
-    async def __aiter__(self) -> AsyncIterator[xr.DataArray]:
+    async def __aiter__(self) -> AsyncIterator[xr.DataArray | xr.Dataset]:
         async for buffer in self._input_it:
-            out = cupyx.empty_like_pinned(buffer.data)
-            buffer = buffer.copy(data=cp.asnumpy(buffer.data, out=out, blocking=False))
+            if self.is_dataset:
+                out_data = cupyx.empty_like_pinned(buffer["data"].data)
+                out_invalid_data = cupyx.empty_like_pinned(buffer["invalid_data"].data)
+                buffer = buffer.copy(
+                    data={
+                        "data": cp.asnumpy(buffer["data"].data, out=out_data, blocking=False),
+                        "invalid_data": cp.asnumpy(buffer["invalid_data"].data, out=out_invalid_data, blocking=False),
+                    }
+                )
+            else:
+                out = cupyx.empty_like_pinned(buffer.data)
+                buffer = buffer.copy(data=cp.asnumpy(buffer.data, out=out, blocking=False))
+
             self._queue.append(stream_future(buffer))
             async for chunk in self._flush(self._queue_depth):
                 yield chunk
