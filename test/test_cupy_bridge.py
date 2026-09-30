@@ -56,7 +56,7 @@ class TestAsNumpy:
         """Test basic functionality."""
         data = xr.DataArray(cp.arange(1000), dims=("time",), attrs={"time_bias": 100})
         orig = SimpleStream.factory(time_base, time_scale, data, 5)
-        stream = AsNumpy(orig)
+        stream = AsNumpy(orig, is_dataset=False)
         assert stream.time_base == time_base
         assert stream.time_scale == time_scale
         assert stream.channels is None

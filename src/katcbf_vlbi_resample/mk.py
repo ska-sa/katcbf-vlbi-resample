@@ -313,7 +313,7 @@ async def async_main() -> None:  # noqa: D103
     it = vdif_writer.VDIFEncode2Bit(it, samples_per_frame=args.samples_per_frame, threshold=args.threshold)
     # Transfer back to the CPU if needed
     if is_cupy:
-        it = cupy_bridge.AsNumpy(it)
+        it = cupy_bridge.AsNumpy(it, is_dataset=True)
     frameset_it = vdif_writer.VDIFFormatter(it, threads, station=args.station, samples_per_frame=args.samples_per_frame)
 
     # The above just sets up an iterator. Now use it to write to file.

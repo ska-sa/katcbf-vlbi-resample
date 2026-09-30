@@ -174,7 +174,7 @@ class VDIFEncode2Bit:
             )
             del encoded
 
-            reshaped_buffer = buffer_to_encode.data.reshape(*leading_shape, n_frames, n_frames * words_per_frame)
+            reshaped_buffer = buffer_to_encode.data.reshape(*leading_shape, n_frames, samples_per_frame)
 
             per_frame_nan = xr.DataArray(
                 data=np.isnan(reshaped_buffer).any(axis=-1),
