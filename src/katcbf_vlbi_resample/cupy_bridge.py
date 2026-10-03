@@ -58,40 +58,33 @@ class AsCupy(ChunkwiseStream[xr.DataArray, xr.DataArray]):
         return await loop.run_in_executor(None, as_cupy, chunk)
 
 
-class AsNumpy:
+class AsNumpy[T: xr.DataArray | xr.Dataset]:
     """Transfer a stream from cupy to numpy."""
 
     def __init__(
         self,
-        input_data: Stream[xr.DataArray | xr.Dataset],
+        input_data: Stream[T],
         queue_depth: int = 1,
-        is_dataset: bool = False,
     ) -> None:
         self.time_base = input_data.time_base
         self.time_scale = input_data.time_scale
         self.channels = input_data.channels
         self.is_cupy = False
-        self.is_dataset = is_dataset
         self._input_it = aiter(input_data)
-        self._queue: deque[asyncio.Future[xr.DataArray | xr.Dataset]] = deque()
+        self._queue: deque[asyncio.Future[T]] = deque()
         self._queue_depth = queue_depth
 
-    async def _flush(self, max_size: int) -> AsyncIterator[xr.DataArray | xr.Dataset]:
+    async def _flush(self, max_size: int) -> AsyncIterator[T]:
         while len(self._queue) > max_size:
             yield (await self._queue.popleft())
 
-    async def __aiter__(self) -> AsyncIterator[xr.DataArray | xr.Dataset]:
+    async def __aiter__(self) -> AsyncIterator[T]:
         async for buffer in self._input_it:
-            if self.is_dataset:
-                out_data = cupyx.empty_like_pinned(buffer["data"].data)
-                out_invalid_data = cupyx.empty_like_pinned(buffer["invalid_data"].data)
-                buffer = buffer.copy(
-                    data={
-                        "data": cp.asnumpy(buffer["data"].data, out=out_data, blocking=False),
-                        "invalid_data": cp.asnumpy(buffer["invalid_data"].data, out=out_invalid_data, blocking=False),
-                    }
-                )
-            else:
+            if isinstance(buffer, xr.Dataset):
+                for var_name, data_var in buffer.data_vars.items():
+                    out = cupyx.empty_like_pinned(data_var.data)
+                    buffer[var_name] = data_var.copy(data=cp.asnumpy(data_var.data, out=out, blocking=False))
+            elif isinstance(buffer, xr.DataArray):
                 out = cupyx.empty_like_pinned(buffer.data)
                 buffer = buffer.copy(data=cp.asnumpy(buffer.data, out=out, blocking=False))
 
