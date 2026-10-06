@@ -143,49 +143,37 @@ class VDIFEncode2Bit:
             del in_data
 
             n_frames = buffer.sizes["time"] // samples_per_frame
-            buffer_to_encode = buffer.isel(time=np.s_[: n_frames * samples_per_frame])
+            if n_frames == 0:
+                # TODO: Figure out why _encode_2bit complains about the input being
+                # empty when n_frames is 0. It seems to handle it with 1D buffer.isel()
+                continue
+
+            buffer_slice = buffer.isel(time=np.s_[: n_frames * samples_per_frame])
+            buffer_by_frame = buffer_slice.coarsen(time=samples_per_frame, boundary="exact").construct(
+                time=("time", "sample")
+            )
+            del buffer_slice
             encoded = xr.apply_ufunc(
                 _encode_2bit_words,
-                buffer_to_encode,
-                input_core_dims=[["time"]],
-                output_core_dims=[("time",)],
-                exclude_dims={"time"},
+                buffer_by_frame,
+                input_core_dims=[["sample"]],
+                output_core_dims=[("word",)],
+                exclude_dims={"sample"},
                 keep_attrs=True,
                 kwargs=dict(threshold=self.threshold),
             )
-            # NOTE: xarray.DataArray will not accept reassignment of
-            # data attribute with new shape. Hence, create a new DataArray
-            # with the reshaped backing data. Reshaped data will have shape
-            # - (sideband, pol, frames, words_per_frame)
-            leading_shape = encoded.data.shape[:-1]
-            leading_dims = encoded.dims[:-1]
-            words_per_frame = samples_per_frame // self.SAMPLES_PER_WORD
-            reframed_data = encoded.data.reshape(*leading_shape, n_frames, words_per_frame)
-            # TODO: Handling the coords is a bit... not neat.
-            # Basically, ignore the time dimension.
-            coords = {name: coord for name, coord in encoded.coords.items() if "time" not in coord.dims}
-
-            encoded_reshaped = xr.DataArray(
-                reframed_data,
-                dims=(*leading_dims, "frame", "word"),
-                coords=coords,
-                attrs=encoded.attrs,
-                name=encoded.name,
-            )
-            del encoded
-
-            reshaped_buffer = buffer_to_encode.data.reshape(*leading_shape, n_frames, samples_per_frame)
 
             per_frame_nan = xr.DataArray(
-                data=np.isnan(reshaped_buffer).any(axis=-1),
-                dims=(*leading_dims, "frame"),
-                coords=coords,
+                data=np.isnan(buffer_by_frame).any(axis=-1),
+                dims=buffer_by_frame.dims[:-1],
+                coords=buffer_by_frame.coords,
             )
+            del buffer_by_frame
 
-            assert encoded_reshaped.attrs["time_bias"] % self.SAMPLES_PER_WORD == 0
-            encoded_reshaped.attrs["time_bias"] //= self.SAMPLES_PER_WORD
-            yield xr.Dataset({"data": encoded_reshaped, "invalid_data": per_frame_nan})
-            del encoded_reshaped
+            assert encoded.attrs["time_bias"] % self.SAMPLES_PER_WORD == 0
+            encoded.attrs["time_bias"] //= self.SAMPLES_PER_WORD
+            yield xr.Dataset({"data": encoded, "invalid_data": per_frame_nan})
+            del encoded
             del per_frame_nan
             # Cut off the piece that's been processed. We then copy the
             # tail piece so that the bulk of the memory can be freed.
@@ -232,7 +220,6 @@ def _make_header(
         # TODO: check that it's ASCII and the first character is >= '0'
         field("station ID", 3, 0, 16, (ord(station[0]) << 8) | ord(station[1]))
     field("bits/sample", 3, 26, 5, bps - 1)
-    field("invalid data", 0, 31, 1, 0)
     return header, ref_time
 
 
@@ -292,7 +279,7 @@ class VDIFFormatter:
     ) -> VDIFFrame:
         header = header.copy()
         if invalid_data:
-            header[0] |= np.uint32(1 << 31)
+            header[0] |= 1 << 31
         header[3] |= thread_id << 16
         return VDIFFrame(header, frame_data)
 
@@ -304,21 +291,19 @@ class VDIFFormatter:
         header[1] |= frame % self._frame_rate
         return [
             self._frame(i, header, thread, invalid_data)
-            for i, (thread, invalid_data) in enumerate(zip(frame_data, per_frame_invalid_data))
+            for i, (thread, invalid_data) in enumerate(zip(frame_data, per_frame_invalid_data, strict=True))
         ]
 
     async def __aiter__(self) -> AsyncIterator[list[VDIFFrame]]:
         words_per_frame = self._samples_per_frame // VDIFEncode2Bit.SAMPLES_PER_WORD
         async for dataset in self._input_it:
-            # NOTE: Buffer now has shape (sidebands, pols, frames, words_per_frame)
             buffer = dataset["data"]
-            assert words_per_frame == buffer.shape[-1]
-            # NOTE: invalid_data has shape (sidebands, pols, frames)
+            assert words_per_frame == buffer.sizes["word"]
             invalid_data = dataset["invalid_data"]
-            n_frames = invalid_data.shape[-1]
+            n_frames = invalid_data.sizes["time"]
 
             # xarray's overheads are too high to use it on a per-frame basis.
-            # Turn the buffer into a plain ol' numpy array (thread × time).
+            # Turn the buffers into a plain ol' numpy array (thread × time).
             raw_data = [buffer.sel(thread_idx).to_numpy() for thread_idx in self._threads]
             raw_invalid_data = [invalid_data.sel(thread_idx).to_numpy() for thread_idx in self._threads]
 

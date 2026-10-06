@@ -168,9 +168,9 @@ class TestVDIFEncode2Bit:
         assert enc.time_scale == orig.time_scale * vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
         assert enc.is_cupy == orig.is_cupy
         chunks = [chunk async for chunk in enc]
-        # NOTE: Each data_array has shape (..., n_frames, words_per_frame)
+        # NOTE: Each data_array has shape (..., time, words_per_frame)
         # Concatenate encoded data across the frame dimension
-        concat_data = xr.concat([chunk["data"] for chunk in chunks], dim="frame")
+        concat_data = xr.concat([chunk["data"] for chunk in chunks], dim="time")
 
         # The original time_base is on a frame boundary, so frame boundaries
         # occur when the sample index is a multiple of samples_per_frame. So
@@ -180,7 +180,7 @@ class TestVDIFEncode2Bit:
         actual_start = enc.time_base + fraction_to_time_delta(concat_data.attrs["time_bias"] * enc.time_scale)
         assert abs(actual_start - expected_start) <= TimeDelta(1e-10, format="sec")
         assert (
-            concat_data.sizes["frame"] * concat_data.sizes["word"] == 480 // vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
+            concat_data.sizes["time"] * concat_data.sizes["word"] == 480 // vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
         )
         used_input_data = input_data.isel(time=xp.s_[23:503])
         exepcted_encoded = vdif_writer._encode_2bit_words(used_input_data.data, 1.0)
