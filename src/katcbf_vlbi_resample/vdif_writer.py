@@ -90,6 +90,10 @@ class VDIFEncode2Bit:
     The power levels must already have been adjusted to make this an
     threshold appropriate.
 
+    TODO: Update this comment to reflect the new logic
+    - Output array is in units of frames, with each frame containing
+      `words_per_frame` words, and each word contains `SAMPLES_PER_WORD`
+      samples.
     The output array is in units of VDIF words (32-bit little-endian) rather
     than samples, and `time_bias` is also in units of words. Only real-valued
     unchannelised data is supported.
@@ -123,7 +127,7 @@ class VDIFEncode2Bit:
 
         self.samples_per_frame = samples_per_frame
         self.time_base = input_data.time_base - TimeDelta(shift, format="sec", scale="tai")
-        self.time_scale = input_data.time_scale * self.SAMPLES_PER_WORD
+        self.time_scale = input_data.time_scale * self.samples_per_frame
         self.channels = None
         self.is_cupy = input_data.is_cupy
         self.threshold = threshold
@@ -170,8 +174,8 @@ class VDIFEncode2Bit:
             )
             del buffer_by_frame
 
-            assert encoded.attrs["time_bias"] % self.SAMPLES_PER_WORD == 0
-            encoded.attrs["time_bias"] //= self.SAMPLES_PER_WORD
+            assert encoded.attrs["time_bias"] % samples_per_frame == 0
+            encoded.attrs["time_bias"] //= samples_per_frame
             yield xr.Dataset({"data": encoded, "invalid_data": per_frame_nan})
             del encoded
             del per_frame_nan
@@ -258,8 +262,8 @@ class VDIFFormatter:
         )
         self._samples_per_frame = samples_per_frame
         self._threads = threads
-        words_per_frame = samples_per_frame // VDIFEncode2Bit.SAMPLES_PER_WORD
-        frame_rate = 1 / (words_per_frame * input_data.time_scale)
+        # NOTE: Incoming data now has shape (..., time, words_per_frame) and time_scale is per frame
+        frame_rate = 1 / input_data.time_scale
         if frame_rate.denominator != 1:
             raise ValueError("samples_per_frame does not yield an integer frame rate")
         self._frame_rate = int(frame_rate)
@@ -309,6 +313,9 @@ class VDIFFormatter:
 
             assert all(data.ndim == 2 for data in raw_data)
             assert all(invalid.ndim == 1 for invalid in raw_invalid_data)
+            # TODO: Is this start_frame calculation correct anymore?
+            # - Each buffer has shape (..., time, words_per_frame) and time_scale is per frame
+            #   -> It is incremented ~accordingly in the for-loop below
             start_frame = int(buffer[0].attrs["time_bias"] * self._frame_rate * self.time_scale)
             del buffer
             for i in range(n_frames):

@@ -164,11 +164,12 @@ class TestVDIFEncode2Bit:
 
     async def test_success(self, xp, orig: SimpleStream[xr.DataArray], input_data: xr.DataArray) -> None:
         """Test normal usage."""
+        words_per_frame = SAMPLES_PER_FRAME // vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
         enc = vdif_writer.VDIFEncode2Bit(orig, SAMPLES_PER_FRAME, 1.0)
-        assert enc.time_scale == orig.time_scale * vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
+        # NOTE: Encoded data now has shape (..., time, words_per_frame)
+        assert enc.time_scale == orig.time_scale * vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD * words_per_frame
         assert enc.is_cupy == orig.is_cupy
         chunks = [chunk async for chunk in enc]
-        # NOTE: Each data_array has shape (..., time, words_per_frame)
         # Concatenate encoded data across the frame dimension
         concat_data = xr.concat([chunk["data"] for chunk in chunks], dim="time")
 
@@ -183,10 +184,9 @@ class TestVDIFEncode2Bit:
             concat_data.sizes["time"] * concat_data.sizes["word"] == 480 // vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
         )
         used_input_data = input_data.isel(time=xp.s_[23:503])
-        exepcted_encoded = vdif_writer._encode_2bit_words(used_input_data.data, 1.0)
-        words_per_frame = SAMPLES_PER_FRAME // vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
-        exepcted_encoded = exepcted_encoded.reshape(-1, words_per_frame)
-        xp.testing.assert_array_equal(concat_data.data, exepcted_encoded)
+        expected_encoded = vdif_writer._encode_2bit_words(used_input_data.data, 1.0)
+        expected_encoded = expected_encoded.reshape(-1, words_per_frame)
+        xp.testing.assert_array_equal(concat_data.data, expected_encoded)
 
 
 class TestVDIFFormatter:
