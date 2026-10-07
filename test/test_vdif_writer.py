@@ -210,7 +210,11 @@ class TestVDIFFormatter:
     def test_bad_samples_per_frame_rate(self, orig_dataset: SimpleStream[xr.Dataset]) -> None:
         """Test that ValueError is raised if frame rate is not an integer."""
         with pytest.raises(ValueError, match="samples_per_frame does not yield an integer frame rate"):
-            vdif_writer.VDIFFormatter(orig_dataset, [{}], station="me", samples_per_frame=160032)
+            # NOTE: The incoming orig_dataset bypasses VDIFEncode2Bit,
+            # so the time_scale is not adjusted to be on a per-frame scale.
+            samples_per_frame = 160032
+            orig_dataset.time_scale *= samples_per_frame
+            vdif_writer.VDIFFormatter(orig_dataset, [{}], station="me", samples_per_frame=samples_per_frame)
 
     async def test_success(self, xp, time_base: Time, time_scale: Fraction) -> None:
         """Test normal usage."""
