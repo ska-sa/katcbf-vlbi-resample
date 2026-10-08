@@ -30,9 +30,11 @@ from baseband.base.encoding import OPTIMAL_2BIT_HIGH, TWO_BIT_1_SIGMA
 from baseband.vdif.payload import encode_2bit
 
 from katcbf_vlbi_resample import vdif_writer
-from katcbf_vlbi_resample.utils import concat_time, fraction_to_time_delta
+from katcbf_vlbi_resample.utils import fraction_to_time_delta
 
 from . import SimpleStream
+
+SAMPLES_PER_FRAME = 160
 
 
 # astropy warns about times in the distant future (presumably because
@@ -73,6 +75,8 @@ def test_make_header() -> None:
     assert parsed.station == 1234
     assert parsed.samples_per_frame == 96
     assert parsed["ref_epoch"] == 51
+    # This field is intentionally set to 0 (indicating valid data)
+    assert parsed["invalid_data"] == 0
     # Check that fields that are meant to be blank in fact are
     assert parsed["thread_id"] == 0
     assert parsed["seconds"] == 0
@@ -103,9 +107,30 @@ def input_data(xp) -> xr.DataArray:
 
 
 @pytest.fixture
+def input_dataset(xp) -> xr.Dataset:
+    """Input data, as an `xr.Dataset` with a single chunk."""
+    # TODO: Maybe use the `input_data` fixture above
+    return xr.Dataset(
+        {
+            "data": xr.DataArray(
+                xp.tile(xp.arange(-2.5, 3, dtype=xp.float32), 100),
+                dims=("time",),
+                attrs={"time_bias": 297},
+            )
+        }
+    )
+
+
+@pytest.fixture
 def orig(input_data: xr.DataArray, time_base: Time, time_scale: Fraction) -> SimpleStream[xr.DataArray]:
     """Input stream."""
     return SimpleStream.factory(time_base, time_scale, input_data, 10)
+
+
+@pytest.fixture
+def orig_dataset(input_data: xr.DataArray, time_base: Time, time_scale: Fraction) -> SimpleStream[xr.Dataset]:
+    """Input stream as `xr.Dataset`."""
+    return SimpleStream.dataset_factory(time_base, time_scale, input_data, 10)
 
 
 class TestEncode2Bit:
@@ -139,22 +164,29 @@ class TestVDIFEncode2Bit:
 
     async def test_success(self, xp, orig: SimpleStream[xr.DataArray], input_data: xr.DataArray) -> None:
         """Test normal usage."""
-        enc = vdif_writer.VDIFEncode2Bit(orig, 160, 1.0)
-        assert enc.time_scale == orig.time_scale * vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
+        words_per_frame = SAMPLES_PER_FRAME // vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
+        enc = vdif_writer.VDIFEncode2Bit(orig, SAMPLES_PER_FRAME, 1.0)
+        # NOTE: Encoded data now has shape (..., time, words_per_frame)
+        assert enc.time_scale == orig.time_scale * vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD * words_per_frame
         assert enc.is_cupy == orig.is_cupy
         chunks = [chunk async for chunk in enc]
-        out_data = concat_time(chunks)
+        # Concatenate encoded data across the frame dimension
+        concat_data = xr.concat([chunk["data"] for chunk in chunks], dim="time")
 
         # The original time_base is on a frame boundary, so frame boundaries
         # occur when the sample index is a multiple of samples_per_frame. So
         # after discarding a partial frame, the output should start at sample
         # index 320 on the original clock.
         expected_start = orig.time_base + fraction_to_time_delta(320 * orig.time_scale)
-        actual_start = enc.time_base + fraction_to_time_delta(out_data.attrs["time_bias"] * enc.time_scale)
+        actual_start = enc.time_base + fraction_to_time_delta(concat_data.attrs["time_bias"] * enc.time_scale)
         assert abs(actual_start - expected_start) <= TimeDelta(1e-10, format="sec")
-        assert out_data.sizes["time"] == 480 // vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
+        assert (
+            concat_data.sizes["time"] * concat_data.sizes["word"] == 480 // vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
+        )
         used_input_data = input_data.isel(time=xp.s_[23:503])
-        xp.testing.assert_array_equal(out_data.data, vdif_writer._encode_2bit_words(used_input_data.data, 1.0))
+        expected_encoded = vdif_writer._encode_2bit_words(used_input_data.data, 1.0)
+        expected_encoded = expected_encoded.reshape(-1, words_per_frame)
+        xp.testing.assert_array_equal(concat_data.data, expected_encoded)
 
 
 class TestVDIFFormatter:
@@ -162,7 +194,7 @@ class TestVDIFFormatter:
 
     def test_channelised(self, time_base: Time, time_scale: Fraction) -> None:
         """Test that passing a channelised input raises an exception."""
-        stream = SimpleStream.factory(
+        stream = SimpleStream.dataset_factory(
             time_base,
             time_scale,
             xr.DataArray(np.zeros((16, 16)), dims=("channel", "time"), attrs={"time_bias": 0}),
@@ -170,15 +202,19 @@ class TestVDIFFormatter:
         with pytest.raises(ValueError, match="unchannelised"):
             vdif_writer.VDIFFormatter(stream, [{}], station="me", samples_per_frame=80)
 
-    def test_bad_samples_per_frame_word_align(self, orig: SimpleStream[xr.DataArray]) -> None:
+    def test_bad_samples_per_frame_word_align(self, orig_dataset: SimpleStream[xr.Dataset]) -> None:
         """Test that `samples_per_frame` not a multiple of word size raises :exc:`ValueError`."""
         with pytest.raises(ValueError, match="samples_per_frame must be a multiple of 32"):
-            vdif_writer.VDIFFormatter(orig, [{}], station="me", samples_per_frame=160016)
+            vdif_writer.VDIFFormatter(orig_dataset, [{}], station="me", samples_per_frame=160016)
 
-    def test_bad_samples_per_frame_rate(self, orig: SimpleStream[xr.DataArray]) -> None:
+    def test_bad_samples_per_frame_rate(self, orig_dataset: SimpleStream[xr.Dataset]) -> None:
         """Test that ValueError is raised if frame rate is not an integer."""
         with pytest.raises(ValueError, match="samples_per_frame does not yield an integer frame rate"):
-            vdif_writer.VDIFFormatter(orig, [{}], station="me", samples_per_frame=160032)
+            # NOTE: The incoming orig_dataset bypasses VDIFEncode2Bit,
+            # so the time_scale is not adjusted to be on a per-frame scale.
+            samples_per_frame = 160032
+            orig_dataset.time_scale *= samples_per_frame
+            vdif_writer.VDIFFormatter(orig_dataset, [{}], station="me", samples_per_frame=samples_per_frame)
 
     async def test_success(self, xp, time_base: Time, time_scale: Fraction) -> None:
         """Test normal usage."""
@@ -200,12 +236,11 @@ class TestVDIFFormatter:
             coords={"pol": ["v", "h"]},
             attrs={"time_bias": 320},
         )
-        samples_per_frame = 160
         orig = SimpleStream.factory(time_base, time_scale, data, 100)
         # TWO_BIT_1_SIGMA gives compatibility with baseband's encoding
-        enc = vdif_writer.VDIFEncode2Bit(orig, samples_per_frame, TWO_BIT_1_SIGMA)
+        enc = vdif_writer.VDIFEncode2Bit(orig, SAMPLES_PER_FRAME, TWO_BIT_1_SIGMA)
         fmt = vdif_writer.VDIFFormatter(
-            enc, [{"pol": "h"}, {"pol": "v"}], station="me", samples_per_frame=samples_per_frame
+            enc, [{"pol": "h"}, {"pol": "v"}], station="me", samples_per_frame=SAMPLES_PER_FRAME
         )
 
         # Write the data to an in-memory file
@@ -219,7 +254,7 @@ class TestVDIFFormatter:
         fh.seek(0, 0)
         with baseband.vdif.open(fh, "rs") as vdif_data:
             assert vdif_data.sample_rate == float(1 / time_scale) * u.Hz
-            assert vdif_data.samples_per_frame == samples_per_frame
+            assert vdif_data.samples_per_frame == SAMPLES_PER_FRAME
             assert vdif_data.bps == 2
             assert vdif_data.shape == data.shape[::-1]
             assert vdif_data.sample_shape == (2,)
@@ -228,6 +263,7 @@ class TestVDIFFormatter:
             assert vdif_data.header0["vdif_version"] == 1
             assert vdif_data.header0.nchan == 1
             assert vdif_data.header0.station == "me"
+            assert not vdif_data.header0["invalid_data"]
             out_data = xr.DataArray(
                 vdif_data.read(),
                 dims=("time", "pol"),
