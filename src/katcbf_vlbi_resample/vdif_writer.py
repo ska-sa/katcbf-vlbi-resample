@@ -90,19 +90,24 @@ class VDIFEncode2Bit:
     The power levels must already have been adjusted to make this an
     threshold appropriate.
 
-    TODO: Update this comment to reflect the new logic
-    - Output array is in units of frames, with each frame containing
-      `words_per_frame` words, and each word contains `SAMPLES_PER_WORD`
-      samples.
-    The output array is in units of VDIF words (32-bit little-endian) rather
-    than samples, and `time_bias` is also in units of words. Only real-valued
-    unchannelised data is supported.
+    Each output is an :class:`xarray.Dataset` with two data variables:
+    `data` and `invalid_data`. In both cases, these DataArrays are aligned
+    to VDIF frame boundaries.
+
+    `data` contains the encoded payload for each frame, with each frame
+    represented by `words_per_frame` 32-bit little-endian words. Each
+    word packs SAMPLES_PER_WORD samples.
+
+    `invalid_data` is a per-frame flag indicating whether that frame
+    contains any invalid samples. Invalid samples are indicated as
+    numpy NaNs in the input data.
 
     The input need not have any particular alignment. The output is aligned
     to the VDIF frame length. This also changes the `time_base` and introduces
     up to half a sample of delay (positive or negative) to align to the VDIF
     sample clock. The amount of the delay depends only on the incoming
-    `time_base` and `time_scale`.
+    `time_base` and `time_scale`. `time_bias` is also aligned to frame
+    boundaries. Only real-valued unchannelised data is supported.
     """
 
     SAMPLES_PER_WORD: Final = 16
@@ -262,7 +267,7 @@ class VDIFFormatter:
         )
         self._samples_per_frame = samples_per_frame
         self._threads = threads
-        # NOTE: Incoming data now has shape (..., time, words_per_frame) and time_scale is per frame
+        # NOTE: Incoming data has shape (..., time, words_per_frame) and time_scale is per frame
         frame_rate = 1 / input_data.time_scale
         if frame_rate.denominator != 1:
             raise ValueError("samples_per_frame does not yield an integer frame rate")
@@ -313,10 +318,7 @@ class VDIFFormatter:
 
             assert all(data.ndim == 2 for data in raw_data)
             assert all(invalid.ndim == 1 for invalid in raw_invalid_data)
-            # TODO: Is this start_frame calculation correct anymore?
-            # - Each buffer has shape (..., time, words_per_frame) and time_scale is per frame
-            #   -> It is incremented ~accordingly in the for-loop below
-            start_frame = int(buffer[0].attrs["time_bias"] * self._frame_rate * self.time_scale)
+            start_frame = int(buffer[0].attrs["time_bias"])
             del buffer
             for i in range(n_frames):
                 frame_data = [data[i, :] for data in raw_data]

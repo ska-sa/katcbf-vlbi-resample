@@ -59,7 +59,11 @@ class AsCupy(ChunkwiseStream[xr.DataArray, xr.DataArray]):
 
 
 class AsNumpy[T: xr.DataArray | xr.Dataset]:
-    """Transfer a stream from cupy to numpy."""
+    """Transfer a stream from cupy to numpy.
+
+    This allows for both :class:`xarray.DataArray` and
+    :class:`xarray.Dataset` inputs.
+    """
 
     def __init__(
         self,
