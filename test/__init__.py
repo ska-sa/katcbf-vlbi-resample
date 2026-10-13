@@ -95,19 +95,12 @@ class SimpleStream[T]:
 
         This can only generate a stream of data sets.
 
-        If `chunk_size` is given, the 'data' within each `dataset` will be split
-        into chunks of this size (on the time dimension). If it is a sequence,
-        it specifies the chunk sizes to use (which must sum to
-        ``data.sizes("time")``).
+        If `chunk_size` is given, the 'data' within each `dataset` will be split into
+        chunks of this size (on the time dimension). If it is a sequence, it specifies
+        the chunk sizes to use (which must sum to ``data.sizes("time")``).
         """
         if chunk_size is None:
-            chunks = [
-                xr.Dataset(
-                    {
-                        "data": data,
-                    }
-                )
-            ]
+            chunks = [xr.Dataset({"data": data})]
         elif isinstance(chunk_size, int):
             chunks = []
             for start in range(0, data.sizes["time"], chunk_size):
@@ -118,7 +111,6 @@ class SimpleStream[T]:
             chunks = []
             for size in chunk_size:
                 assert size <= data.sizes["time"]
-                # TODO: This needs to be a separate slicing of data then create new dataset
                 chunks.append(xr.Dataset({"data": isel_time(data, np.s_[:size])}))
                 data = isel_time(data, np.s_[size:])
             assert data.sizes["time"] == 0, "chunk_size does not sum to the data size"

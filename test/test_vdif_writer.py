@@ -107,21 +107,6 @@ def input_data(xp) -> xr.DataArray:
 
 
 @pytest.fixture
-def input_dataset(xp) -> xr.Dataset:
-    """Input data, as an `xr.Dataset` with a single chunk."""
-    # TODO: Maybe use the `input_data` fixture above
-    return xr.Dataset(
-        {
-            "data": xr.DataArray(
-                xp.tile(xp.arange(-2.5, 3, dtype=xp.float32), 100),
-                dims=("time",),
-                attrs={"time_bias": 297},
-            )
-        }
-    )
-
-
-@pytest.fixture
 def orig(input_data: xr.DataArray, time_base: Time, time_scale: Fraction) -> SimpleStream[xr.DataArray]:
     """Input stream."""
     return SimpleStream.factory(time_base, time_scale, input_data, 10)
