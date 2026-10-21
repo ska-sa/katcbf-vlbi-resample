@@ -113,9 +113,27 @@ def orig(input_data: xr.DataArray, time_base: Time, time_scale: Fraction) -> Sim
 
 
 @pytest.fixture
-def orig_dataset(input_data: xr.DataArray, time_base: Time, time_scale: Fraction) -> SimpleStream[xr.Dataset]:
-    """Input stream as `xr.Dataset`."""
-    return SimpleStream.dataset_factory(time_base, time_scale, input_data, 10)
+def non_default_samples_per_frame() -> int:
+    """`samples_per_frame` that results in a non-integer `frame_rate`.
+
+    This value is still a multiple of 32 so it passes the word-alignment check.
+    """
+    return 160032
+
+
+@pytest.fixture
+def bad_time_scale(non_default_samples_per_frame: int, time_scale: Fraction) -> Fraction:
+    """Time scale that yields a non-integer frame rate for a given `non_default_samples_per_frame`."""
+    return time_scale * non_default_samples_per_frame
+
+
+@pytest.fixture
+def orig_dataset(input_data: xr.DataArray, time_base: Time, bad_time_scale: Fraction) -> SimpleStream[xr.Dataset]:
+    """Input stream as `xr.Dataset`.
+
+    This is specifically used in TestVDIFFormatter, where it bypasses VDIFEncode2Bit.
+    """
+    return SimpleStream.dataset_factory(time_base, bad_time_scale, input_data, 10)
 
 
 class TestEncode2Bit:
@@ -142,10 +160,12 @@ class TestVDIFEncode2Bit:
         with pytest.raises(ValueError, match="samples_per_frame must be a multiple of 32"):
             vdif_writer.VDIFEncode2Bit(orig, 160016, 1.0)
 
-    def test_bad_samples_per_frame_rate(self, orig: SimpleStream[xr.DataArray]) -> None:
+    def test_bad_samples_per_frame_rate(
+        self, orig: SimpleStream[xr.DataArray], non_default_samples_per_frame: int
+    ) -> None:
         """Test that ValueError is raised if frame rate is not an integer."""
         with pytest.raises(ValueError, match="samples_per_frame does not yield an integer frame rate"):
-            vdif_writer.VDIFEncode2Bit(orig, 160032, 1.0)
+            vdif_writer.VDIFEncode2Bit(orig, non_default_samples_per_frame, 1.0)
 
     async def test_success(self, xp, orig: SimpleStream[xr.DataArray], input_data: xr.DataArray) -> None:
         """Test normal usage."""
@@ -192,14 +212,12 @@ class TestVDIFFormatter:
         with pytest.raises(ValueError, match="samples_per_frame must be a multiple of 32"):
             vdif_writer.VDIFFormatter(orig_dataset, [{}], station="me", samples_per_frame=160016)
 
-    def test_bad_samples_per_frame_rate(self, orig_dataset: SimpleStream[xr.Dataset]) -> None:
+    def test_bad_samples_per_frame_rate(
+        self, orig_dataset: SimpleStream[xr.Dataset], non_default_samples_per_frame: int
+    ) -> None:
         """Test that ValueError is raised if frame rate is not an integer."""
         with pytest.raises(ValueError, match="samples_per_frame does not yield an integer frame rate"):
-            # NOTE: The incoming orig_dataset bypasses VDIFEncode2Bit,
-            # so the time_scale is not adjusted to be on a per-frame scale.
-            samples_per_frame = 160032
-            orig_dataset.time_scale *= samples_per_frame
-            vdif_writer.VDIFFormatter(orig_dataset, [{}], station="me", samples_per_frame=samples_per_frame)
+            vdif_writer.VDIFFormatter(orig_dataset, [{}], station="me", samples_per_frame=non_default_samples_per_frame)
 
     async def test_success(self, xp, time_base: Time, time_scale: Fraction) -> None:
         """Test normal usage."""
