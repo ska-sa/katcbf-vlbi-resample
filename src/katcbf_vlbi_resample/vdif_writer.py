@@ -100,14 +100,13 @@ class VDIFEncode2Bit:
 
     `invalid_data` is a per-frame flag indicating whether that frame
     contains any invalid samples. Invalid samples are indicated as
-    numpy NaNs in the input data.
+    NaNs in the input data.
 
     The input need not have any particular alignment. The output is aligned
     to the VDIF frame length. This also changes the `time_base` and introduces
     up to half a sample of delay (positive or negative) to align to the VDIF
     sample clock. The amount of the delay depends only on the incoming
-    `time_base` and `time_scale`. `time_bias` is also aligned to frame
-    boundaries. Only real-valued unchannelised data is supported.
+    `time_base` and `time_scale`. Only real-valued unchannelised data is supported.
     """
 
     SAMPLES_PER_WORD: Final = 16
@@ -283,9 +282,7 @@ class VDIFFormatter:
         self.channels = None
         self.is_cupy = False
 
-    def _frame(
-        self, thread_id: int, header: np.ndarray, frame_data: np.ndarray, invalid_data: bool = False
-    ) -> VDIFFrame:
+    def _frame(self, thread_id: int, header: np.ndarray, frame_data: np.ndarray, invalid_data: bool) -> VDIFFrame:
         header = header.copy()
         if invalid_data:
             header[0] |= 1 << 31
@@ -312,13 +309,15 @@ class VDIFFormatter:
             n_frames = invalid_data.sizes["time"]
 
             # xarray's overheads are too high to use it on a per-frame basis.
-            # Turn the buffers into a plain ol' numpy array (thread × time).
+            # Turn the buffers into a plain ol' numpy array (thread × frame × word).
             raw_data = [buffer.sel(thread_idx).to_numpy() for thread_idx in self._threads]
-            raw_invalid_data = [invalid_data.sel(thread_idx).to_numpy() for thread_idx in self._threads]
+            raw_invalid_data = [
+                invalid_data.sel(thread_idx).transpose("time", "word").to_numpy() for thread_idx in self._threads
+            ]
 
             assert all(data.ndim == 2 for data in raw_data)
             assert all(invalid.ndim == 1 for invalid in raw_invalid_data)
-            start_frame = int(buffer[0].attrs["time_bias"])
+            start_frame = buffer[0].attrs["time_bias"]
             del buffer
             for i in range(n_frames):
                 frame_data = [data[i, :] for data in raw_data]

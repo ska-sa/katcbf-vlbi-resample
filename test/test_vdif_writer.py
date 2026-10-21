@@ -152,7 +152,7 @@ class TestVDIFEncode2Bit:
         words_per_frame = SAMPLES_PER_FRAME // vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
         enc = vdif_writer.VDIFEncode2Bit(orig, SAMPLES_PER_FRAME, 1.0)
         # NOTE: Encoded data now has shape (..., time, words_per_frame)
-        assert enc.time_scale == orig.time_scale * vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD * words_per_frame
+        assert enc.time_scale == orig.time_scale * SAMPLES_PER_FRAME
         assert enc.is_cupy == orig.is_cupy
         chunks = [chunk async for chunk in enc]
         # Concatenate encoded data across the frame dimension
