@@ -107,11 +107,27 @@ def input_data(xp) -> xr.DataArray:
 
 
 @pytest.fixture
+def input_dataset(xp, input_data: xr.DataArray) -> xr.Dataset:
+    """Input dataset, whose data-vars are single chunks."""
+    return xr.Dataset(
+        {
+            "data": input_data,
+            "invalid_data": xr.DataArray(
+                xp.zeros(input_data.sizes["time"], dtype=xp.bool_),
+                dims=input_data.dims,
+            ),
+        },
+        attrs=input_data.attrs,  # This is done to navigate utils.isel_time
+    )
+
+
+@pytest.fixture
 def orig(input_data: xr.DataArray, time_base: Time, time_scale: Fraction) -> SimpleStream[xr.DataArray]:
     """Input stream."""
     return SimpleStream.factory(time_base, time_scale, input_data, 10)
 
 
+# TODO: Maybe parametrise this to have both 160016 and 160032
 @pytest.fixture
 def non_default_samples_per_frame() -> int:
     """`samples_per_frame` that results in a non-integer `frame_rate`.
@@ -128,12 +144,12 @@ def bad_time_scale(non_default_samples_per_frame: int, time_scale: Fraction) -> 
 
 
 @pytest.fixture
-def orig_dataset(input_data: xr.DataArray, time_base: Time, bad_time_scale: Fraction) -> SimpleStream[xr.Dataset]:
+def orig_dataset(input_dataset: xr.Dataset, time_base: Time, bad_time_scale: Fraction) -> SimpleStream[xr.Dataset]:
     """Input stream as `xr.Dataset`.
 
     This is specifically used in TestVDIFFormatter, where it bypasses VDIFEncode2Bit.
     """
-    return SimpleStream.dataset_factory(time_base, bad_time_scale, input_data, 10)
+    return SimpleStream.factory(time_base, bad_time_scale, input_dataset, 10)
 
 
 class TestEncode2Bit:
@@ -199,10 +215,10 @@ class TestVDIFFormatter:
 
     def test_channelised(self, time_base: Time, time_scale: Fraction) -> None:
         """Test that passing a channelised input raises an exception."""
-        stream = SimpleStream.dataset_factory(
+        stream = SimpleStream.factory(
             time_base,
             time_scale,
-            xr.DataArray(np.zeros((16, 16)), dims=("channel", "time"), attrs={"time_bias": 0}),
+            xr.Dataset({"data": xr.DataArray(np.zeros((16, 16)), dims=("channel", "time"))}, attrs={"time_bias": 0}),
         )
         with pytest.raises(ValueError, match="unchannelised"):
             vdif_writer.VDIFFormatter(stream, [{}], station="me", samples_per_frame=80)

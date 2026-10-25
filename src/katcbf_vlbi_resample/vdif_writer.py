@@ -310,10 +310,8 @@ class VDIFFormatter:
 
             # xarray's overheads are too high to use it on a per-frame basis.
             # Turn the buffers into a plain ol' numpy array (thread × frame × word).
-            raw_data = [buffer.sel(thread_idx).to_numpy() for thread_idx in self._threads]
-            raw_invalid_data = [
-                invalid_data.sel(thread_idx).transpose("time", "word").to_numpy() for thread_idx in self._threads
-            ]
+            raw_data = [buffer.sel(thread_idx).transpose("time", "word").to_numpy() for thread_idx in self._threads]
+            raw_invalid_data = [invalid_data.sel(thread_idx).to_numpy() for thread_idx in self._threads]
 
             assert all(data.ndim == 2 for data in raw_data)
             assert all(invalid.ndim == 1 for invalid in raw_invalid_data)

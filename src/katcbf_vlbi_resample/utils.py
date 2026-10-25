@@ -20,10 +20,13 @@ import asyncio
 import functools
 from collections.abc import Sequence
 from fractions import Fraction
+from typing import assert_never, overload
 
 import cupy as cp
 import xarray as xr
 from astropy.time import TimeDelta
+
+X = xr.DataArray | xr.Dataset
 
 
 def concat_time(arrays: Sequence[xr.DataArray]) -> xr.DataArray:
@@ -61,7 +64,15 @@ def concat_time(arrays: Sequence[xr.DataArray]) -> xr.DataArray:
     )
 
 
-def isel_time(array: xr.DataArray, index: slice) -> xr.DataArray:
+@overload
+def isel_time(array: xr.DataArray, index: slice) -> xr.DataArray: ...
+
+
+@overload
+def isel_time(array: xr.Dataset, index: slice) -> xr.Dataset: ...
+
+
+def isel_time(array: X, index: slice) -> X:
     """Slice an array along the time axis.
 
     This takes care of adjusting the `time_bias` attribute of the return value.
@@ -95,9 +106,14 @@ def time_align(array: xr.DataArray, modulus: int, remainder: int = 0) -> xr.Data
         return isel_time(array, slice(trim, None, None))
 
 
-def is_cupy(array: xr.DataArray) -> bool:
+def is_cupy(array: xr.DataArray | xr.Dataset) -> bool:
     """Determine whether `array` contains a cupy array."""
-    return isinstance(array.data, cp.ndarray)
+    if isinstance(array, xr.DataArray):
+        return isinstance(array.data, cp.ndarray)
+    elif isinstance(array, xr.Dataset):
+        return isinstance(array["data"].data, cp.ndarray)
+    else:
+        assert_never(array)
 
 
 def as_cupy(array: xr.DataArray, blocking: bool = False) -> xr.DataArray:

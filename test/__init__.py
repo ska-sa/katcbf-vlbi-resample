@@ -18,6 +18,7 @@
 
 from collections.abc import AsyncIterator, Callable, Iterable
 from fractions import Fraction
+from typing import overload
 
 import numpy as np
 import xarray as xr
@@ -51,13 +52,32 @@ class SimpleStream[T]:
         for chunk in self.chunks:
             yield chunk
 
+    @overload
     @staticmethod
     def factory(
-        time_base: Time, time_scale: Fraction, data: xr.DataArray, chunk_size: int | Iterable[int] | None = None
-    ) -> "SimpleStream[xr.DataArray]":
-        """Build a :class:`SimpleStream` by splitting data into chunks.
+        time_base: Time,
+        time_scale: Fraction,
+        data: xr.DataArray,
+        chunk_size: int | Iterable[int] | None = None,
+    ) -> "SimpleStream[xr.DataArray]": ...
 
-        This can only generate a stream of data arrays, not data sets.
+    @overload
+    @staticmethod
+    def factory(
+        time_base: Time,
+        time_scale: Fraction,
+        data: xr.Dataset,
+        chunk_size: int | Iterable[int] | None = None,
+    ) -> "SimpleStream[xr.Dataset]": ...
+
+    @staticmethod
+    def factory[X: xr.DataArray | xr.Dataset](
+        time_base: Time,
+        time_scale: Fraction,
+        data: xr.DataArray | xr.Dataset,
+        chunk_size: int | Iterable[int] | None = None,
+    ) -> "SimpleStream[X]":
+        """Build a :class:`SimpleStream` by splitting data into chunks.
 
         If `chunk_size` is given, the given `data` will be split into chunks of this
         size (on the time dimension). If it is a sequence, it specifies the chunk
@@ -84,41 +104,7 @@ class SimpleStream[T]:
             time_scale=time_scale,
             channels=data.sizes.get("channel"),
             is_cupy=is_cupy(data),
-            chunks=chunks,
-        )
-
-    @staticmethod
-    def dataset_factory(
-        time_base: Time, time_scale: Fraction, data: xr.DataArray, chunk_size: int | Iterable[int] | None = None
-    ) -> "SimpleStream[xr.Dataset]":
-        """Build a :class:`SimpleStream` by splitting data into chunks of `xr.Dataset`.
-
-        This can only generate a stream of data sets.
-
-        If `chunk_size` is given, the 'data' within each `dataset` will be split into
-        chunks of this size (on the time dimension). If it is a sequence, it specifies
-        the chunk sizes to use (which must sum to ``data.sizes("time")``).
-        """
-        if chunk_size is None:
-            chunks = [xr.Dataset({"data": data})]
-        elif isinstance(chunk_size, int):
-            chunks = []
-            for start in range(0, data.sizes["time"], chunk_size):
-                stop = min(start + chunk_size, data.sizes["time"])
-                chunk = xr.Dataset({"data": isel_time(data, np.s_[start:stop])})
-                chunks.append(chunk)
-        else:
-            chunks = []
-            for size in chunk_size:
-                assert size <= data.sizes["time"]
-                chunks.append(xr.Dataset({"data": isel_time(data, np.s_[:size])}))
-                data = isel_time(data, np.s_[size:])
-            assert data.sizes["time"] == 0, "chunk_size does not sum to the data size"
-
-        return SimpleStream(
-            time_base=time_base,
-            time_scale=time_scale,
-            channels=data.sizes.get("channel"),
-            is_cupy=is_cupy(data),
-            chunks=chunks,
+            # TODO: The overloading of type-annotations has broken the line below
+            # - Expecting Iterable[X]; given list[xr.DataArray | xr.Dataset]
+            chunks=chunks,  # type: ignore
         )

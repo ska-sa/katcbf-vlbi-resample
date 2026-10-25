@@ -19,6 +19,7 @@
 import asyncio
 from collections import deque
 from collections.abc import AsyncIterator
+from typing import assert_never
 
 import cupy as cp
 import cupyx
@@ -91,6 +92,8 @@ class AsNumpy[T: xr.DataArray | xr.Dataset]:
             elif isinstance(buffer, xr.DataArray):
                 out = cupyx.empty_like_pinned(buffer.data)
                 buffer = buffer.copy(data=cp.asnumpy(buffer.data, out=out, blocking=False))
+            else:
+                assert_never(buffer)
 
             self._queue.append(stream_future(buffer))
             async for chunk in self._flush(self._queue_depth):
