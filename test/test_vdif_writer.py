@@ -107,21 +107,6 @@ def input_data(xp) -> xr.DataArray:
 
 
 @pytest.fixture
-def input_dataset(xp, input_data: xr.DataArray) -> xr.Dataset:
-    """Input dataset, whose data-vars are single chunks."""
-    return xr.Dataset(
-        {
-            "data": input_data,
-            "invalid_data": xr.DataArray(
-                xp.zeros(input_data.sizes["time"], dtype=xp.bool_),
-                dims=input_data.dims,
-            ),
-        },
-        attrs=input_data.attrs,  # This is done to navigate utils.isel_time
-    )
-
-
-@pytest.fixture
 def orig(input_data: xr.DataArray, time_base: Time, time_scale: Fraction) -> SimpleStream[xr.DataArray]:
     """Input stream."""
     return SimpleStream.factory(time_base, time_scale, input_data, 10)
@@ -138,18 +123,45 @@ def non_default_samples_per_frame() -> int:
 
 
 @pytest.fixture
-def bad_time_scale(non_default_samples_per_frame: int, time_scale: Fraction) -> Fraction:
+def non_default_time_scale(non_default_samples_per_frame: int, time_scale: Fraction) -> Fraction:
     """Time scale that yields a non-integer frame rate for a given `non_default_samples_per_frame`."""
     return time_scale * non_default_samples_per_frame
 
 
 @pytest.fixture
-def orig_dataset(input_dataset: xr.Dataset, time_base: Time, bad_time_scale: Fraction) -> SimpleStream[xr.Dataset]:
+def aligned_time_base(time_base: Time) -> Time:
+    """Time base shifted back to the start of its UTC second.
+
+    This is specifically used in TestVDIFFormatter, where it bypasses VDIFEncode2Bit.
+    """
+    fractional_second = time_base.utc.ymdhms.second % 1
+    return time_base - TimeDelta(fractional_second, format="sec", scale="tai")
+
+
+@pytest.fixture
+def input_dataset(xp, input_data: xr.DataArray) -> xr.Dataset:
+    """Input dataset, whose data-vars are single chunks."""
+    return xr.Dataset(
+        {
+            "data": input_data,
+            "invalid_data": xr.DataArray(
+                xp.zeros(input_data.sizes["time"], dtype=xp.bool_),
+                dims=input_data.dims,
+            ),
+        },
+        attrs=input_data.attrs,  # This is done to navigate utils.isel_time
+    )
+
+
+@pytest.fixture
+def orig_dataset(
+    input_dataset: xr.Dataset, aligned_time_base: Time, non_default_time_scale: Fraction
+) -> SimpleStream[xr.Dataset]:
     """Input stream as `xr.Dataset`.
 
     This is specifically used in TestVDIFFormatter, where it bypasses VDIFEncode2Bit.
     """
-    return SimpleStream.factory(time_base, bad_time_scale, input_dataset, 10)
+    return SimpleStream.factory(aligned_time_base, non_default_time_scale, input_dataset, 10)
 
 
 class TestEncode2Bit:
@@ -208,6 +220,22 @@ class TestVDIFEncode2Bit:
         expected_encoded = vdif_writer._encode_2bit_words(used_input_data.data, 1.0)
         expected_encoded = expected_encoded.reshape(-1, words_per_frame)
         xp.testing.assert_array_equal(concat_data.data, expected_encoded)
+
+    async def test_nan_sets_per_frame_invalid_data(self, xp, time_base: Time, time_scale: Fraction) -> None:
+        """Test each frame that contains at least one NaN is marked as invalid."""
+        data = xp.zeros(3 * SAMPLES_PER_FRAME, dtype=xp.float32)
+        frame_midpoint_index = SAMPLES_PER_FRAME // 2
+        # Add one NaN in the first frame
+        data[frame_midpoint_index] = xp.nan
+        # Add another in the mdidle of the third frame
+        data[2 * SAMPLES_PER_FRAME + frame_midpoint_index] = xp.nan
+        input_data = xr.DataArray(data, dims=("time",), attrs={"time_bias": 0})
+        orig = SimpleStream.factory(time_base, time_scale, input_data)
+        enc = vdif_writer.VDIFEncode2Bit(orig, SAMPLES_PER_FRAME, TWO_BIT_1_SIGMA)
+
+        chunks = [chunk async for chunk in enc]
+        invalid_data = xr.concat([chunk["invalid_data"] for chunk in chunks], dim="time")
+        xp.testing.assert_array_equal(invalid_data.data, xp.asarray([True, False, True]))
 
 
 class TestVDIFFormatter:
@@ -291,3 +319,22 @@ class TestVDIFFormatter:
             # Align out_data to match the axes of data
             out_data = out_data.reindex_like(data).transpose(*data.dims)
             xr.testing.assert_equal(out_data, data.as_numpy())
+
+    async def test_invalid_data_sets_header_bit(self, aligned_time_base: Time, time_scale: Fraction) -> None:
+        """Test copying each frame's invalid-data flag into its VDIF header."""
+        # Simulate VDIFEncode2Bit encoded data
+        # - Two frames, ten words per frame
+        # - Each word is four packed bytes
+        data = xr.DataArray(
+            np.zeros((2, 10), dtype=np.uint32),
+            dims=("time", "word"),
+            attrs={"time_bias": 0},
+        )
+        invalid_data = xr.DataArray(np.array([False, True]), dims=("time",))
+        dataset = xr.Dataset({"data": data, "invalid_data": invalid_data})
+        orig = SimpleStream.factory(aligned_time_base, time_scale * SAMPLES_PER_FRAME, dataset)
+        fmt = vdif_writer.VDIFFormatter(orig, [{}], station="me", samples_per_frame=SAMPLES_PER_FRAME)
+
+        frames = [frame for frameset in [frameset async for frameset in fmt] for frame in frameset]
+        invalid_flags = [bool(baseband.vdif.header.VDIFHeader(frame.header)["invalid_data"]) for frame in frames]
+        assert invalid_flags == [False, True]
