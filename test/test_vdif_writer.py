@@ -227,7 +227,7 @@ class TestVDIFFormatter:
             # For some reason baseband only exposes this as a key, not an attribute
             assert vdif_data.header0["vdif_version"] == 1
             assert vdif_data.header0.nchan == 1
-            assert vdif_data.header0.station == "me"
+            assert vdif_data.header0.station == "Me"
             out_data = xr.DataArray(
                 vdif_data.read(),
                 dims=("time", "pol"),
