@@ -83,13 +83,13 @@ def test_make_header_bad() -> None:
     """Test exception handling in :func:`katcbf_vlbi_resample.vdif_writer._make_header`."""
     ref_time = Time("2025-09-01 12:34:56", format="iso", scale="utc")
     with pytest.raises(ValueError, match="bits/sample does not fit in the 5-bit VDIF header field"):
-        vdif_writer._make_header(bps=33, station="me", samples_per_frame=256, ref_time=ref_time)
+        vdif_writer._make_header(bps=33, station="Me", samples_per_frame=256, ref_time=ref_time)
     with pytest.raises(ValueError, match="numeric station ID is out of range"):
         vdif_writer._make_header(bps=2, station=-1, samples_per_frame=96, ref_time=ref_time)
     with pytest.raises(ValueError, match="numeric station ID is out of range"):
         vdif_writer._make_header(bps=2, station=0x3000, samples_per_frame=96, ref_time=ref_time)
     with pytest.raises(ValueError, match="samples_per_frame does not yield a whole number of 8-byte units"):
-        vdif_writer._make_header(bps=3, station="me", samples_per_frame=96, ref_time=ref_time)
+        vdif_writer._make_header(bps=3, station="Me", samples_per_frame=96, ref_time=ref_time)
 
 
 @pytest.fixture
@@ -168,17 +168,17 @@ class TestVDIFFormatter:
             xr.DataArray(np.zeros((16, 16)), dims=("channel", "time"), attrs={"time_bias": 0}),
         )
         with pytest.raises(ValueError, match="unchannelised"):
-            vdif_writer.VDIFFormatter(stream, [{}], station="me", samples_per_frame=80)
+            vdif_writer.VDIFFormatter(stream, [{}], station="Me", samples_per_frame=80)
 
     def test_bad_samples_per_frame_word_align(self, orig: SimpleStream[xr.DataArray]) -> None:
         """Test that `samples_per_frame` not a multiple of word size raises :exc:`ValueError`."""
         with pytest.raises(ValueError, match="samples_per_frame must be a multiple of 32"):
-            vdif_writer.VDIFFormatter(orig, [{}], station="me", samples_per_frame=160016)
+            vdif_writer.VDIFFormatter(orig, [{}], station="Me", samples_per_frame=160016)
 
     def test_bad_samples_per_frame_rate(self, orig: SimpleStream[xr.DataArray]) -> None:
         """Test that ValueError is raised if frame rate is not an integer."""
         with pytest.raises(ValueError, match="samples_per_frame does not yield an integer frame rate"):
-            vdif_writer.VDIFFormatter(orig, [{}], station="me", samples_per_frame=160032)
+            vdif_writer.VDIFFormatter(orig, [{}], station="Me", samples_per_frame=160032)
 
     async def test_success(self, xp, time_base: Time, time_scale: Fraction) -> None:
         """Test normal usage."""
@@ -205,7 +205,7 @@ class TestVDIFFormatter:
         # TWO_BIT_1_SIGMA gives compatibility with baseband's encoding
         enc = vdif_writer.VDIFEncode2Bit(orig, samples_per_frame, TWO_BIT_1_SIGMA)
         fmt = vdif_writer.VDIFFormatter(
-            enc, [{"pol": "h"}, {"pol": "v"}], station="me", samples_per_frame=samples_per_frame
+            enc, [{"pol": "h"}, {"pol": "v"}], station="Me", samples_per_frame=samples_per_frame
         )
 
         # Write the data to an in-memory file
@@ -227,7 +227,7 @@ class TestVDIFFormatter:
             # For some reason baseband only exposes this as a key, not an attribute
             assert vdif_data.header0["vdif_version"] == 1
             assert vdif_data.header0.nchan == 1
-            assert vdif_data.header0.station == "me"
+            assert vdif_data.header0.station == "Me"
             out_data = xr.DataArray(
                 vdif_data.read(),
                 dims=("time", "pol"),
