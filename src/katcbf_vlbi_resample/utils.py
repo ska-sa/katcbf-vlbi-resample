@@ -101,7 +101,14 @@ def is_cupy(array: xr.DataArray | xr.Dataset) -> bool:
     if isinstance(array, xr.DataArray):
         return isinstance(array.data, cp.ndarray)
     elif isinstance(array, xr.Dataset):
-        return isinstance(array["data"].data, cp.ndarray)
+        cupy_check = [isinstance(data_var.data, cp.ndarray) for data_var in array.values()]
+        if not cupy_check:
+            raise RuntimeError("Dataset has no data variables:\n{array}")
+        elif len(set(cupy_check)) > 1:
+            raise RuntimeError("Dataset has mix of cupy and numpy arrays")
+        else:
+            # Should be a single boolean element
+            return cupy_check[0]
     else:
         assert_never(array)
 
