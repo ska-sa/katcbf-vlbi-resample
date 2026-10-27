@@ -85,7 +85,5 @@ class SimpleStream[T]:
             time_scale=time_scale,
             channels=data.sizes.get("channel"),
             is_cupy=is_cupy(data),
-            # TODO: The overloading of type-annotations has broken the line below
-            # - Expecting Iterable[X]; given list[xr.DataArray | xr.Dataset]
-            chunks=chunks,  # type: ignore
+            chunks=chunks,
         )
