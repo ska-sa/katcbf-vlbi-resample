@@ -94,13 +94,13 @@ class VDIFEncode2Bit:
     `data` and `invalid_data`. In both cases, these DataArrays are aligned
     to VDIF frame boundaries.
 
-    `data` contains the encoded payload for each frame, with each frame
-    represented by `words_per_frame` 32-bit little-endian words. Each
-    word packs SAMPLES_PER_WORD samples.
+    `data` is indexed by `time` (one entry per VDIF frame) and `word` (32-bit
+    words within each frame). Each frame contains `words_per_frame` little-endian
+    words. Each word packs `SAMPLES_PER_WORD` samples.
 
-    `invalid_data` is a per-frame flag indicating whether that frame
-    contains any invalid samples. Invalid samples are indicated as
-    NaNs in the input data.
+    `invalid_data` is a per-frame flag indicating whether that frame contains
+    contains any invalid samples. Invalid samples are indicated as NaNs in the
+    input data.
 
     The input need not have any particular alignment. The output is aligned
     to the VDIF frame length. This also changes the `time_base` and introduces

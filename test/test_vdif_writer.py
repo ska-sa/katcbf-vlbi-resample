@@ -134,7 +134,7 @@ def aligned_time_base(time_base: Time) -> Time:
 
 @pytest.fixture
 def input_dataset(xp, input_data: xr.DataArray) -> xr.Dataset:
-    """Input dataset, whose data-vars are single chunks."""
+    """Input dataset, whose data-vars have a single (`time`) dimension."""
     return xr.Dataset(
         {
             "data": input_data,
