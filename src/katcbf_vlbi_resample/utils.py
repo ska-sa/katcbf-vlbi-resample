@@ -20,13 +20,11 @@ import asyncio
 import functools
 from collections.abc import Sequence
 from fractions import Fraction
-from typing import assert_never, overload
+from typing import assert_never
 
 import cupy as cp
 import xarray as xr
 from astropy.time import TimeDelta
-
-X = xr.DataArray | xr.Dataset
 
 
 def concat_time(arrays: Sequence[xr.DataArray]) -> xr.DataArray:
@@ -64,16 +62,8 @@ def concat_time(arrays: Sequence[xr.DataArray]) -> xr.DataArray:
     )
 
 
-@overload
-def isel_time(array: xr.DataArray, index: slice) -> xr.DataArray: ...
-
-
-@overload
-def isel_time(array: xr.Dataset, index: slice) -> xr.Dataset: ...
-
-
-def isel_time(array: X, index: slice) -> X:
-    """Slice an array along the time axis.
+def isel_time[T: xr.DataArray | xr.Dataset](array: T, index: slice) -> T:  # type: ignore
+    """Slice an array or dataset along the time axis.
 
     This takes care of adjusting the `time_bias` attribute of the return value.
     The slice must have a step size of 1.
@@ -81,7 +71,7 @@ def isel_time(array: X, index: slice) -> X:
     start, stop, step = index.indices(array.sizes["time"])
     if step != 1:
         raise ValueError("isel_time requires step = 1")
-    array = array.isel(time=index)
+    array = array.isel(time=index)  # type: ignore
     array.attrs["time_bias"] += start
     return array
 
