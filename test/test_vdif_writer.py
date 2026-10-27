@@ -34,8 +34,6 @@ from katcbf_vlbi_resample.utils import fraction_to_time_delta
 
 from . import SimpleStream
 
-SAMPLES_PER_FRAME = 160
-
 
 # astropy warns about times in the distant future (presumably because
 # leap-seconds are not known).
@@ -112,20 +110,16 @@ def orig_samples(input_data: xr.DataArray, time_base: Time, time_scale: Fraction
     return SimpleStream.factory(time_base, time_scale, input_data, 10)
 
 
-# TODO: Maybe parametrise this to have both 160016 and 160032
 @pytest.fixture
-def non_default_samples_per_frame() -> int:
-    """`samples_per_frame` that results in a non-integer `frame_rate`.
-
-    This value is still a multiple of 32 so it passes the word-alignment check.
-    """
-    return 160032
+def samples_per_frame() -> int:
+    """Return the default number of samples per VDIF frame."""
+    return 160
 
 
 @pytest.fixture
-def non_default_time_scale(non_default_samples_per_frame: int, time_scale: Fraction) -> Fraction:
-    """Time scale that yields a non-integer frame rate for a given `non_default_samples_per_frame`."""
-    return time_scale * non_default_samples_per_frame
+def frame_time_scale(samples_per_frame: int, time_scale: Fraction) -> Fraction:
+    """Time scale that yields a non-integer frame rate for a given `samples_per_frame`."""
+    return time_scale * samples_per_frame
 
 
 @pytest.fixture
@@ -155,13 +149,13 @@ def input_dataset(xp, input_data: xr.DataArray) -> xr.Dataset:
 
 @pytest.fixture
 def orig_frames(
-    input_dataset: xr.Dataset, aligned_time_base: Time, non_default_time_scale: Fraction
+    input_dataset: xr.Dataset, aligned_time_base: Time, frame_time_scale: Fraction
 ) -> SimpleStream[xr.Dataset]:
     """Input stream as `xr.Dataset`.
 
     This is specifically used in TestVDIFFormatter, where it bypasses VDIFEncode2Bit.
     """
-    return SimpleStream.factory(aligned_time_base, non_default_time_scale, input_dataset, 10)
+    return SimpleStream.factory(aligned_time_base, frame_time_scale, input_dataset, 10)
 
 
 class TestEncode2Bit:
@@ -183,24 +177,28 @@ class TestEncode2Bit:
 class TestVDIFEncode2Bit:
     """Tests for :class:`katcbf_vlbi_resample.vdif_writer.VDIFEncode2Bit."""
 
-    def test_bad_samples_per_frame_word_align(self, orig_samples: SimpleStream[xr.DataArray]) -> None:
+    @pytest.mark.parametrize("samples_per_frame", [160016])
+    def test_bad_samples_per_frame_word_align(
+        self, samples_per_frame: int, orig_samples: SimpleStream[xr.DataArray]
+    ) -> None:
         """Test that `samples_per_frame` not a multiple of word size raises :exc:`ValueError`."""
         with pytest.raises(ValueError, match="samples_per_frame must be a multiple of 32"):
-            vdif_writer.VDIFEncode2Bit(orig_samples, 160016, 1.0)
+            vdif_writer.VDIFEncode2Bit(orig_samples, samples_per_frame, 1.0)
 
-    def test_bad_samples_per_frame_rate(
-        self, orig_samples: SimpleStream[xr.DataArray], non_default_samples_per_frame: int
-    ) -> None:
+    @pytest.mark.parametrize("samples_per_frame", [160032])
+    def test_bad_samples_per_frame_rate(self, orig_samples: SimpleStream[xr.DataArray], samples_per_frame: int) -> None:
         """Test that ValueError is raised if frame rate is not an integer."""
         with pytest.raises(ValueError, match="samples_per_frame does not yield an integer frame rate"):
-            vdif_writer.VDIFEncode2Bit(orig_samples, non_default_samples_per_frame, 1.0)
+            vdif_writer.VDIFEncode2Bit(orig_samples, samples_per_frame, 1.0)
 
-    async def test_success(self, xp, orig_samples: SimpleStream[xr.DataArray], input_data: xr.DataArray) -> None:
+    async def test_success(
+        self, xp, samples_per_frame: int, orig_samples: SimpleStream[xr.DataArray], input_data: xr.DataArray
+    ) -> None:
         """Test normal usage."""
-        words_per_frame = SAMPLES_PER_FRAME // vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
-        enc = vdif_writer.VDIFEncode2Bit(orig_samples, SAMPLES_PER_FRAME, 1.0)
+        words_per_frame = samples_per_frame // vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
+        enc = vdif_writer.VDIFEncode2Bit(orig_samples, samples_per_frame, 1.0)
         # NOTE: Encoded data now has shape (..., time, words_per_frame)
-        assert enc.time_scale == orig_samples.time_scale * SAMPLES_PER_FRAME
+        assert enc.time_scale == orig_samples.time_scale * samples_per_frame
         assert enc.is_cupy == orig_samples.is_cupy
         chunks = [chunk async for chunk in enc]
         # Concatenate encoded data across the frame dimension
@@ -221,17 +219,19 @@ class TestVDIFEncode2Bit:
         expected_encoded = expected_encoded.reshape(-1, words_per_frame)
         xp.testing.assert_array_equal(concat_data.data, expected_encoded)
 
-    async def test_nan_sets_per_frame_invalid_data(self, xp, time_base: Time, time_scale: Fraction) -> None:
+    async def test_nan_sets_per_frame_invalid_data(
+        self, xp, samples_per_frame: int, time_base: Time, time_scale: Fraction
+    ) -> None:
         """Test each frame that contains at least one NaN is marked as invalid."""
-        data = xp.zeros(3 * SAMPLES_PER_FRAME, dtype=xp.float32)
-        frame_midpoint_index = SAMPLES_PER_FRAME // 2
+        data = xp.zeros(3 * samples_per_frame, dtype=xp.float32)
+        frame_midpoint_index = samples_per_frame // 2
         # Add one NaN in the first frame
         data[frame_midpoint_index] = xp.nan
         # Add another in the mdidle of the third frame
-        data[2 * SAMPLES_PER_FRAME + frame_midpoint_index] = xp.nan
+        data[2 * samples_per_frame + frame_midpoint_index] = xp.nan
         input_data = xr.DataArray(data, dims=("time",), attrs={"time_bias": 0})
         orig_samples = SimpleStream.factory(time_base, time_scale, input_data)
-        enc = vdif_writer.VDIFEncode2Bit(orig_samples, SAMPLES_PER_FRAME, TWO_BIT_1_SIGMA)
+        enc = vdif_writer.VDIFEncode2Bit(orig_samples, samples_per_frame, TWO_BIT_1_SIGMA)
 
         chunks = [chunk async for chunk in enc]
         invalid_data = xr.concat([chunk["invalid_data"] for chunk in chunks], dim="time")
@@ -251,19 +251,21 @@ class TestVDIFFormatter:
         with pytest.raises(ValueError, match="unchannelised"):
             vdif_writer.VDIFFormatter(stream, [{}], station="Me", samples_per_frame=80)
 
-    def test_bad_samples_per_frame_word_align(self, orig_frames: SimpleStream[xr.Dataset]) -> None:
+    @pytest.mark.parametrize("samples_per_frame", [160016])
+    def test_bad_samples_per_frame_word_align(
+        self, samples_per_frame: int, orig_frames: SimpleStream[xr.Dataset]
+    ) -> None:
         """Test that `samples_per_frame` not a multiple of word size raises :exc:`ValueError`."""
         with pytest.raises(ValueError, match="samples_per_frame must be a multiple of 32"):
-            vdif_writer.VDIFFormatter(orig_frames, [{}], station="Me", samples_per_frame=160016)
+            vdif_writer.VDIFFormatter(orig_frames, [{}], station="Me", samples_per_frame=samples_per_frame)
 
-    def test_bad_samples_per_frame_rate(
-        self, orig_frames: SimpleStream[xr.Dataset], non_default_samples_per_frame: int
-    ) -> None:
+    @pytest.mark.parametrize("samples_per_frame", [160032])
+    def test_bad_samples_per_frame_rate(self, orig_frames: SimpleStream[xr.Dataset], samples_per_frame: int) -> None:
         """Test that ValueError is raised if frame rate is not an integer."""
         with pytest.raises(ValueError, match="samples_per_frame does not yield an integer frame rate"):
-            vdif_writer.VDIFFormatter(orig_frames, [{}], station="Me", samples_per_frame=non_default_samples_per_frame)
+            vdif_writer.VDIFFormatter(orig_frames, [{}], station="Me", samples_per_frame=samples_per_frame)
 
-    async def test_success(self, xp, time_base: Time, time_scale: Fraction) -> None:
+    async def test_success(self, xp, samples_per_frame: int, time_base: Time, time_scale: Fraction) -> None:
         """Test normal usage."""
         rng = np.random.default_rng(seed=1)
         # We test separately that VDIFEncoder2Bit clips data to whole frames,
@@ -285,9 +287,9 @@ class TestVDIFFormatter:
         )
         orig = SimpleStream.factory(time_base, time_scale, data, 100)
         # TWO_BIT_1_SIGMA gives compatibility with baseband's encoding
-        enc = vdif_writer.VDIFEncode2Bit(orig, SAMPLES_PER_FRAME, TWO_BIT_1_SIGMA)
+        enc = vdif_writer.VDIFEncode2Bit(orig, samples_per_frame, TWO_BIT_1_SIGMA)
         fmt = vdif_writer.VDIFFormatter(
-            enc, [{"pol": "h"}, {"pol": "v"}], station="Me", samples_per_frame=SAMPLES_PER_FRAME
+            enc, [{"pol": "h"}, {"pol": "v"}], station="Me", samples_per_frame=samples_per_frame
         )
 
         # Write the data to an in-memory file
@@ -301,7 +303,7 @@ class TestVDIFFormatter:
         fh.seek(0, 0)
         with baseband.vdif.open(fh, "rs") as vdif_data:
             assert vdif_data.sample_rate == float(1 / time_scale) * u.Hz
-            assert vdif_data.samples_per_frame == SAMPLES_PER_FRAME
+            assert vdif_data.samples_per_frame == samples_per_frame
             assert vdif_data.bps == 2
             assert vdif_data.shape == data.shape[::-1]
             assert vdif_data.sample_shape == (2,)
@@ -320,7 +322,9 @@ class TestVDIFFormatter:
             out_data = out_data.reindex_like(data).transpose(*data.dims)
             xr.testing.assert_equal(out_data, data.as_numpy())
 
-    async def test_invalid_data_sets_header_bit(self, aligned_time_base: Time, time_scale: Fraction) -> None:
+    async def test_invalid_data_sets_header_bit(
+        self, samples_per_frame: int, aligned_time_base: Time, time_scale: Fraction
+    ) -> None:
         """Test copying each frame's invalid-data flag into its VDIF header."""
         # Simulate VDIFEncode2Bit encoded data
         # - Two frames, ten words per frame
@@ -332,8 +336,8 @@ class TestVDIFFormatter:
         )
         invalid_data = xr.DataArray(np.array([False, True]), dims=("time",))
         dataset = xr.Dataset({"data": data, "invalid_data": invalid_data})
-        orig = SimpleStream.factory(aligned_time_base, time_scale * SAMPLES_PER_FRAME, dataset)
-        fmt = vdif_writer.VDIFFormatter(orig, [{}], station="Me", samples_per_frame=SAMPLES_PER_FRAME)
+        orig = SimpleStream.factory(aligned_time_base, time_scale * samples_per_frame, dataset)
+        fmt = vdif_writer.VDIFFormatter(orig, [{}], station="Me", samples_per_frame=samples_per_frame)
 
         frames = [frame for frameset in [frameset async for frameset in fmt] for frame in frameset]
         invalid_flags = [bool(baseband.vdif.header.VDIFHeader(frame.header)["invalid_data"]) for frame in frames]
