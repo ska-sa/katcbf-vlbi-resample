@@ -306,7 +306,7 @@ class VDIFFormatter:
             buffer = dataset["data"]
             assert words_per_frame == buffer.sizes["word"]
             invalid_data = dataset["invalid_data"]
-            n_frames = invalid_data.sizes["time"]
+            n_frames = dataset.sizes["time"]
 
             # xarray's overheads are too high to use it on a per-frame basis.
             # Turn the buffers into a plain ol' numpy array (thread × frame × word).
