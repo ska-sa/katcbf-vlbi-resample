@@ -18,7 +18,6 @@
 
 from collections.abc import AsyncIterator, Callable, Iterable
 from fractions import Fraction
-from typing import overload
 
 import numpy as np
 import xarray as xr
@@ -52,31 +51,13 @@ class SimpleStream[T]:
         for chunk in self.chunks:
             yield chunk
 
-    @overload
-    @staticmethod
-    def factory(
-        time_base: Time,
-        time_scale: Fraction,
-        data: xr.DataArray,
-        chunk_size: int | Iterable[int] | None = None,
-    ) -> "SimpleStream[xr.DataArray]": ...
-
-    @overload
-    @staticmethod
-    def factory(
-        time_base: Time,
-        time_scale: Fraction,
-        data: xr.Dataset,
-        chunk_size: int | Iterable[int] | None = None,
-    ) -> "SimpleStream[xr.Dataset]": ...
-
     @staticmethod
     def factory[X: xr.DataArray | xr.Dataset](
         time_base: Time,
         time_scale: Fraction,
-        data: xr.DataArray | xr.Dataset,
+        data: X,
         chunk_size: int | Iterable[int] | None = None,
-    ) -> "SimpleStream[X]":
+    ) -> "SimpleStream[X]":  # type: ignore
         """Build a :class:`SimpleStream` by splitting data into chunks.
 
         If `chunk_size` is given, the given `data` will be split into chunks of this
