@@ -283,7 +283,12 @@ class TestVDIFFormatter:
             vdif_writer.VDIFFormatter(orig_frames, [{}], station="Me", samples_per_frame=samples_per_frame)
 
     async def test_success(self, xp, samples_per_frame: int, time_base: Time, time_scale: Fraction) -> None:
-        """Test normal usage."""
+        """Test normal usage.
+
+        This includes testing the setting of `invalid_data` bit in the VDIF header.
+        The test places a NaN sample in the second VDIF frame for 'v' pol, and
+        verifies that in the formatted output data.
+        """
         rng = np.random.default_rng(seed=1)
         # We test separately that VDIFEncoder2Bit clips data to whole frames,
         # so for this test we keep things simple by aligning everything to
@@ -302,6 +307,8 @@ class TestVDIFFormatter:
             coords={"pol": ["v", "h"]},
             attrs={"time_bias": 320},
         )
+        # Put a NaN halfway into the second frame, for pol 'v'
+        data.data[0, samples_per_frame + samples_per_frame // 2] = xp.nan
         orig = SimpleStream.factory(time_base, time_scale, data, 100)
         # TWO_BIT_1_SIGMA gives compatibility with baseband's encoding
         enc = vdif_writer.VDIFEncode2Bit(orig, samples_per_frame, TWO_BIT_1_SIGMA)
@@ -311,10 +318,16 @@ class TestVDIFFormatter:
 
         # Write the data to an in-memory file
         fh = io.BytesIO()
+        invalid_flags = []
         async for frameset in fmt:
             for frame in frameset:
+                invalid_flags.append(bool(baseband.vdif.header.VDIFHeader(frame.header)["invalid_data"]))
                 fh.write(frame.header)
                 fh.write(frame.payload)
+        # `v` is the second configured VDIF thread, so its second frame is
+        # the fourth frame received above.
+        assert invalid_flags[:4] == [False, False, False, True]
+        assert not any(invalid_flags[4:])
 
         # Read it back and compare to the original data
         fh.seek(0, 0)
@@ -329,7 +342,6 @@ class TestVDIFFormatter:
             assert vdif_data.header0["vdif_version"] == 1
             assert vdif_data.header0.nchan == 1
             assert vdif_data.header0.station == "Me"
-            assert not vdif_data.header0["invalid_data"]
             out_data = xr.DataArray(
                 vdif_data.read(),
                 dims=("time", "pol"),
@@ -337,25 +349,10 @@ class TestVDIFFormatter:
             )
             # Align out_data to match the axes of data
             out_data = out_data.reindex_like(data).transpose(*data.dims)
-            xr.testing.assert_equal(out_data, data.as_numpy())
-
-    async def test_invalid_data_sets_header_bit(
-        self, samples_per_frame: int, aligned_time_base: Time, time_scale: Fraction
-    ) -> None:
-        """Test copying each frame's invalid-data flag into its VDIF header."""
-        # Simulate VDIFEncode2Bit encoded data
-        # - Two frames, ten words per frame
-        # - Each word is four packed bytes
-        data = xr.DataArray(
-            np.zeros((2, 10), dtype=np.uint32),
-            dims=("time", "word"),
-            attrs={"time_bias": 0},
-        )
-        invalid_data = xr.DataArray(np.array([False, True]), dims=("time",))
-        dataset = xr.Dataset({"data": data, "invalid_data": invalid_data})
-        orig = SimpleStream.factory(aligned_time_base, time_scale * samples_per_frame, dataset)
-        fmt = vdif_writer.VDIFFormatter(orig, [{}], station="Me", samples_per_frame=samples_per_frame)
-
-        frames = [frame for frameset in [frameset async for frameset in fmt] for frame in frameset]
-        invalid_flags = [bool(baseband.vdif.header.VDIFHeader(frame.header)["invalid_data"]) for frame in frames]
-        assert invalid_flags == [False, True]
+            expected_data = data.as_numpy()
+            # Confirm where we expect data to be valid (not NaN)
+            finite = np.isfinite(expected_data.data)
+            # VDIFEncode2Bit marks an entire frame invalid if any sample is NaN.
+            # The NaN is in the second frame of the `v` pol; mark it accordingly.
+            finite[0, samples_per_frame : 2 * samples_per_frame] = False
+            xr.testing.assert_equal(out_data.where(finite), expected_data.where(finite))
