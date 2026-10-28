@@ -310,11 +310,15 @@ async def async_main() -> None:  # noqa: D103
     # Normalise the power.
     it = power.NormalisePower(it_rms, 1.0, power=args.normalise)
     # Encode to VDIF
-    it = vdif_writer.VDIFEncode2Bit(it, samples_per_frame=args.samples_per_frame, threshold=args.threshold)
+    encoded_it: Stream[xr.Dataset] = vdif_writer.VDIFEncode2Bit(
+        it, samples_per_frame=args.samples_per_frame, threshold=args.threshold
+    )
     # Transfer back to the CPU if needed
     if is_cupy:
-        it = cupy_bridge.AsNumpy(it)
-    frameset_it = vdif_writer.VDIFFormatter(it, threads, station=args.station, samples_per_frame=args.samples_per_frame)
+        encoded_it = cupy_bridge.AsNumpy(encoded_it)
+    frameset_it = vdif_writer.VDIFFormatter(
+        encoded_it, threads, station=args.station, samples_per_frame=args.samples_per_frame
+    )
 
     # The above just sets up an iterator. Now use it to write to file.
     fns = iter(FileNameSequencer(args.output))

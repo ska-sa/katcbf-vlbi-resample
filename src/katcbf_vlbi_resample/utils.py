@@ -20,6 +20,7 @@ import asyncio
 import functools
 from collections.abc import Sequence
 from fractions import Fraction
+from typing import assert_never
 
 import cupy as cp
 import xarray as xr
@@ -61,8 +62,8 @@ def concat_time(arrays: Sequence[xr.DataArray]) -> xr.DataArray:
     )
 
 
-def isel_time(array: xr.DataArray, index: slice) -> xr.DataArray:
-    """Slice an array along the time axis.
+def isel_time[T: xr.DataArray | xr.Dataset](array: T, index: slice) -> T:  # type: ignore
+    """Slice an array or dataset along the time axis.
 
     This takes care of adjusting the `time_bias` attribute of the return value.
     The slice must have a step size of 1.
@@ -70,7 +71,7 @@ def isel_time(array: xr.DataArray, index: slice) -> xr.DataArray:
     start, stop, step = index.indices(array.sizes["time"])
     if step != 1:
         raise ValueError("isel_time requires step = 1")
-    array = array.isel(time=index)
+    array = array.isel(time=index)  # type: ignore
     array.attrs["time_bias"] += start
     return array
 
@@ -95,9 +96,21 @@ def time_align(array: xr.DataArray, modulus: int, remainder: int = 0) -> xr.Data
         return isel_time(array, slice(trim, None, None))
 
 
-def is_cupy(array: xr.DataArray) -> bool:
+def is_cupy(array: xr.DataArray | xr.Dataset) -> bool:
     """Determine whether `array` contains a cupy array."""
-    return isinstance(array.data, cp.ndarray)
+    if isinstance(array, xr.DataArray):
+        return isinstance(array.data, cp.ndarray)
+    elif isinstance(array, xr.Dataset):
+        cupy_check = [isinstance(data_var.data, cp.ndarray) for data_var in array.values()]
+        if not cupy_check:
+            raise RuntimeError("Dataset has no data variables:\n{array}")
+        elif len(set(cupy_check)) > 1:
+            raise RuntimeError("Dataset has mix of cupy and numpy arrays")
+        else:
+            # Should be a single boolean element
+            return cupy_check[0]
+    else:
+        assert_never(array)
 
 
 def as_cupy(array: xr.DataArray, blocking: bool = False) -> xr.DataArray:

@@ -52,12 +52,13 @@ class SimpleStream[T]:
             yield chunk
 
     @staticmethod
-    def factory(
-        time_base: Time, time_scale: Fraction, data: xr.DataArray, chunk_size: int | Iterable[int] | None = None
-    ) -> "SimpleStream[xr.DataArray]":
+    def factory[X: xr.DataArray | xr.Dataset](
+        time_base: Time,
+        time_scale: Fraction,
+        data: X,
+        chunk_size: int | Iterable[int] | None = None,
+    ) -> "SimpleStream[X]":  # type: ignore
         """Build a :class:`SimpleStream` by splitting data into chunks.
-
-        This can only generate a stream of data arrays, not data sets.
 
         If `chunk_size` is given, the given `data` will be split into chunks of this
         size (on the time dimension). If it is a sequence, it specifies the chunk
