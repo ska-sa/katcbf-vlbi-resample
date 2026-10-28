@@ -55,7 +55,11 @@ def _encode_2bit(values, threshold: float):
 
 
 def _encode_2bit_words(values, threshold: float):
-    return _encode_2bit(values, threshold).view("<u4")
+    xp = cp.get_array_module(values)
+    # NOTE: `ascontiguousarray` is used to get around NumPy's complaints
+    # when `encode_2bit` is given data that is not contiguous in memory.
+    # - e.g. incoming values are strided across a dimension
+    return xp.ascontiguousarray(_encode_2bit(values, threshold)).view("<u4")
 
 
 def _reference_epoch(time: Time) -> tuple[Time, int]:
@@ -171,11 +175,7 @@ class VDIFEncode2Bit:
                 kwargs=dict(threshold=self.threshold),
             )
 
-            per_frame_nan = xr.DataArray(
-                data=np.isnan(buffer_by_frame).any(axis=-1),
-                dims=buffer_by_frame.dims[:-1],
-                coords=buffer_by_frame.coords,
-            )
+            per_frame_nan = buffer_by_frame.isnull().any(dim="sample")
             del buffer_by_frame
 
             assert encoded.attrs["time_bias"] % samples_per_frame == 0

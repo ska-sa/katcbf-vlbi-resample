@@ -34,6 +34,9 @@ from katcbf_vlbi_resample.utils import fraction_to_time_delta
 
 from . import SimpleStream
 
+N_POLS = 2
+N_STREAMS = 4
+
 
 # astropy warns about times in the distant future (presumably because
 # leap-seconds are not known).
@@ -223,19 +226,33 @@ class TestVDIFEncode2Bit:
         self, xp, samples_per_frame: int, time_base: Time, time_scale: Fraction
     ) -> None:
         """Test each frame that contains at least one NaN is marked as invalid."""
-        data = xp.zeros(3 * samples_per_frame, dtype=xp.float32)
+        n_frames = 3
+        data = xp.zeros(shape=(N_STREAMS, n_frames * samples_per_frame, N_POLS), dtype=xp.float32)
         frame_midpoint_index = samples_per_frame // 2
-        # Add one NaN in the first frame
-        data[frame_midpoint_index] = xp.nan
-        # Add another in the mdidle of the third frame
-        data[2 * samples_per_frame + frame_midpoint_index] = xp.nan
-        input_data = xr.DataArray(data, dims=("time",), attrs={"time_bias": 0})
+        # NOTE: We keep NaNs localized to individual (stream, pol) combinations
+        # so the test verifies that each combination's affected frame is marked
+        # invalid independently. This is achieved by marking one NaN in the first
+        # frame and another in the third frame.
+        data[1, frame_midpoint_index, 0] = xp.nan
+        data[3, 2 * samples_per_frame + frame_midpoint_index, 1] = xp.nan
+        input_data = xr.DataArray(
+            data,
+            dims=("stream", "time", "pol"),
+            coords={"stream": list(range(N_STREAMS)), "pol": ["X", "Y"]},
+            attrs={"time_bias": 0},
+        )
         orig_samples = SimpleStream.factory(time_base, time_scale, input_data)
         enc = vdif_writer.VDIFEncode2Bit(orig_samples, samples_per_frame, TWO_BIT_1_SIGMA)
 
         chunks = [chunk async for chunk in enc]
         invalid_data = xr.concat([chunk["invalid_data"] for chunk in chunks], dim="time")
-        xp.testing.assert_array_equal(invalid_data.data, xp.asarray([True, False, True]))
+        expected = xp.zeros((N_STREAMS, n_frames, N_POLS), dtype=xp.bool_)
+        expected[1, 0, 0] = True
+        expected[3, 2, 1] = True
+        assert invalid_data.dims == ("stream", "time", "pol")
+        xr.testing.assert_equal(invalid_data.coords["stream"], input_data.coords["stream"])
+        xr.testing.assert_equal(invalid_data.coords["pol"], input_data.coords["pol"])
+        xp.testing.assert_array_equal(invalid_data.data, expected)
 
 
 class TestVDIFFormatter:
