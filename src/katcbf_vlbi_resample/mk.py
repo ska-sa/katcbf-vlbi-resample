@@ -72,7 +72,7 @@ def parse_args(threads: list[dict[str, str]]) -> argparse.Namespace:
     output_group.add_argument("--bandwidth", type=float, required=True, metavar="HZ", help="Output bandwidth")
     output_group.add_argument("--frequency", type=float, required=True, metavar="HZ", help="Output centre frequency")
     output_group.add_argument(
-        "--samples-per-frame", type=int, default=20000, metavar="SAMPLES", help="Samples per VDIF frame [%(default)s]"
+        "--samples-per-frame", type=int, default=25000, metavar="SAMPLES", help="Samples per VDIF frame [%(default)s]"
     )
     output_group.add_argument("--station", default="Me", metavar="ID", help="VDIF station ID [%(default)s]")
     output_group.add_argument(
