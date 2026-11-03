@@ -62,7 +62,7 @@ def concat_time(arrays: Sequence[xr.DataArray]) -> xr.DataArray:
     )
 
 
-def isel_time[T: xr.DataArray | xr.Dataset](array: T, index: slice) -> T:  # type: ignore
+def isel_time[T: xr.DataArray | xr.Dataset](array: T, index: slice) -> T:
     """Slice an array or dataset along the time axis.
 
     This takes care of adjusting the `time_bias` attribute of the return value.
@@ -71,6 +71,7 @@ def isel_time[T: xr.DataArray | xr.Dataset](array: T, index: slice) -> T:  # typ
     start, stop, step = index.indices(array.sizes["time"])
     if step != 1:
         raise ValueError("isel_time requires step = 1")
+    # Type ignore below due to https://github.com/python/mypy/issues/16826
     array = array.isel(time=index)  # type: ignore
     array.attrs["time_bias"] += start
     return array
@@ -103,7 +104,7 @@ def is_cupy(array: xr.DataArray | xr.Dataset) -> bool:
     elif isinstance(array, xr.Dataset):
         cupy_check = [isinstance(data_var.data, cp.ndarray) for data_var in array.values()]
         if not cupy_check:
-            raise RuntimeError("Dataset has no data variables:\n{array}")
+            raise RuntimeError(f"Dataset has no data variables:\n{array}")
         elif len(set(cupy_check)) > 1:
             raise RuntimeError("Dataset has mix of cupy and numpy arrays")
         else:

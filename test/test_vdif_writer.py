@@ -35,7 +35,7 @@ from katcbf_vlbi_resample.utils import fraction_to_time_delta
 from . import SimpleStream
 
 N_POLS = 2
-N_STREAMS = 4
+N_CHANNELS = 4
 
 
 # astropy warns about times in the distant future (presumably because
@@ -52,14 +52,14 @@ N_STREAMS = 4
     ],
 )
 def test_reference_epoch(time: str, ref_time: str, epoch: int) -> None:
-    """Test :func:`katcbf_vlbi_resample.vdif_writer._reference_epoch."""
+    """Test :func:`katcbf_vlbi_resample.vdif_writer._reference_epoch`."""
     time_a = Time(time, format="iso", scale="utc")
     ref_time_a = Time(ref_time, format="iso", scale="utc")
     assert vdif_writer._reference_epoch(time_a) == (ref_time_a, epoch)
 
 
 def test_make_header() -> None:
-    """Test :func:`katcbf_vlbi_resample.vdif_writer._make_header.
+    """Test :func:`katcbf_vlbi_resample.vdif_writer._make_header`.
 
     There is also indirect testing in TestVDIFFormatter which covers cases not
     tested here (particularly non-numeric station IDs).
@@ -121,7 +121,10 @@ def samples_per_frame() -> int:
 
 @pytest.fixture
 def frame_time_scale(samples_per_frame: int, time_scale: Fraction) -> Fraction:
-    """Time scale that yields a non-integer frame rate for a given `samples_per_frame`."""
+    """Time scale for a single VDIF frame.
+
+    This is used when bypassing :class:`katcbf_vlbi_resample.vdif_writer.VDIFEncode2Bit`.
+    """
     return time_scale * samples_per_frame
 
 
@@ -129,7 +132,8 @@ def frame_time_scale(samples_per_frame: int, time_scale: Fraction) -> Fraction:
 def aligned_time_base(time_base: Time) -> Time:
     """Time base shifted back to the start of its UTC second.
 
-    This is specifically used in TestVDIFFormatter, where it bypasses VDIFEncode2Bit.
+    This is specifically used in :class:`.TestVDIFFormatter`, where it bypasses
+    :class:`katcbf_vlbi_resample.vdif_writer.VDIFEncode2Bit`.
     """
     fractional_second = time_base.utc.ymdhms.second % 1
     return time_base - TimeDelta(fractional_second, format="sec", scale="tai")
@@ -178,7 +182,7 @@ class TestEncode2Bit:
 
 
 class TestVDIFEncode2Bit:
-    """Tests for :class:`katcbf_vlbi_resample.vdif_writer.VDIFEncode2Bit."""
+    """Tests for :class:`katcbf_vlbi_resample.vdif_writer.VDIFEncode2Bit`."""
 
     @pytest.mark.parametrize("samples_per_frame", [160016])
     def test_bad_samples_per_frame_word_align(
@@ -227,7 +231,7 @@ class TestVDIFEncode2Bit:
     ) -> None:
         """Test each frame that contains at least one NaN is marked as invalid."""
         n_frames = 3
-        data = xp.zeros(shape=(N_STREAMS, n_frames * samples_per_frame, N_POLS), dtype=xp.float32)
+        data = xp.zeros(shape=(N_CHANNELS, n_frames * samples_per_frame, N_POLS), dtype=xp.float32)
         frame_midpoint_index = samples_per_frame // 2
         # NOTE: We keep NaNs localized to individual (stream, pol) combinations
         # so the test verifies that each combination's affected frame is marked
@@ -237,8 +241,8 @@ class TestVDIFEncode2Bit:
         data[3, 2 * samples_per_frame + frame_midpoint_index, 1] = xp.nan
         input_data = xr.DataArray(
             data,
-            dims=("stream", "time", "pol"),
-            coords={"stream": list(range(N_STREAMS)), "pol": ["X", "Y"]},
+            dims=("channel", "time", "pol"),
+            coords={"channel": list(range(N_CHANNELS)), "pol": ["X", "Y"]},
             attrs={"time_bias": 0},
         )
         orig_samples = SimpleStream.factory(time_base, time_scale, input_data)
@@ -246,11 +250,11 @@ class TestVDIFEncode2Bit:
 
         chunks = [chunk async for chunk in enc]
         invalid_data = xr.concat([chunk["invalid_data"] for chunk in chunks], dim="time")
-        expected = xp.zeros((N_STREAMS, n_frames, N_POLS), dtype=xp.bool_)
+        expected = xp.zeros((N_CHANNELS, n_frames, N_POLS), dtype=xp.bool_)
         expected[1, 0, 0] = True
         expected[3, 2, 1] = True
-        assert invalid_data.dims == ("stream", "time", "pol")
-        xr.testing.assert_equal(invalid_data.coords["stream"], input_data.coords["stream"])
+        assert invalid_data.dims == ("channel", "time", "pol")
+        xr.testing.assert_equal(invalid_data.coords["channel"], input_data.coords["channel"])
         xr.testing.assert_equal(invalid_data.coords["pol"], input_data.coords["pol"])
         xp.testing.assert_array_equal(invalid_data.data, expected)
 

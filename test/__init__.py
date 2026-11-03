@@ -57,7 +57,7 @@ class SimpleStream[T]:
         time_scale: Fraction,
         data: X,
         chunk_size: int | Iterable[int] | None = None,
-    ) -> "SimpleStream[X]":  # type: ignore
+    ) -> "SimpleStream[X]":
         """Build a :class:`SimpleStream` by splitting data into chunks.
 
         If `chunk_size` is given, the given `data` will be split into chunks of this
