@@ -35,7 +35,7 @@ from katcbf_vlbi_resample.utils import fraction_to_time_delta
 from . import SimpleStream
 
 N_POLS = 2
-N_CHANNELS = 4
+N_SIDEBANDS = 4
 
 
 # astropy warns about times in the distant future (presumably because
@@ -142,7 +142,7 @@ def aligned_time_base(time_base: Time) -> Time:
 @pytest.fixture
 def input_frames(xp, samples_per_frame: int) -> xr.Dataset:
     """Input data, as a single chunk of frames."""
-    # This is artbitarily chosen, but also to exercise the chunking in
+    # This is arbitrarily chosen, but also to exercise the chunking in
     # :func:`.SimpleStream.factory`.
     n_frames = 100
     words_per_frame = samples_per_frame // vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
@@ -238,7 +238,7 @@ class TestVDIFEncode2Bit:
     ) -> None:
         """Test each frame that contains at least one NaN is marked as invalid."""
         n_frames = 3
-        data = xp.zeros(shape=(N_CHANNELS, n_frames * samples_per_frame, N_POLS), dtype=xp.float32)
+        data = xp.zeros(shape=(N_SIDEBANDS, n_frames * samples_per_frame, N_POLS), dtype=xp.float32)
         frame_midpoint_index = samples_per_frame // 2
         # NOTE: We keep NaNs localized to individual (stream, pol) combinations
         # so the test verifies that each combination's affected frame is marked
@@ -248,8 +248,8 @@ class TestVDIFEncode2Bit:
         data[3, 2 * samples_per_frame + frame_midpoint_index, 1] = xp.nan
         input_samples = xr.DataArray(
             data,
-            dims=("stream", "time", "pol"),
-            coords={"stream": list(range(N_CHANNELS)), "pol": ["X", "Y"]},
+            dims=("sideband", "time", "pol"),
+            coords={"sideband": list(range(N_SIDEBANDS)), "pol": ["X", "Y"]},
             attrs={"time_bias": 0},
         )
         orig_samples = SimpleStream.factory(time_base, time_scale, input_samples)
@@ -257,11 +257,11 @@ class TestVDIFEncode2Bit:
 
         chunks = [chunk async for chunk in enc]
         invalid_data = xr.concat([chunk["invalid_data"] for chunk in chunks], dim="time")
-        expected = xp.zeros((N_CHANNELS, n_frames, N_POLS), dtype=xp.bool_)
+        expected = xp.zeros((N_SIDEBANDS, n_frames, N_POLS), dtype=xp.bool_)
         expected[1, 0, 0] = True
         expected[3, 2, 1] = True
-        assert invalid_data.dims == ("stream", "time", "pol")
-        xr.testing.assert_equal(invalid_data.coords["stream"], input_samples.coords["stream"])
+        assert invalid_data.dims == ("sideband", "time", "pol")
+        xr.testing.assert_equal(invalid_data.coords["sideband"], input_samples.coords["sideband"])
         xr.testing.assert_equal(invalid_data.coords["pol"], input_samples.coords["pol"])
         xp.testing.assert_array_equal(invalid_data.data, expected)
 

@@ -175,14 +175,14 @@ class VDIFEncode2Bit:
                 kwargs=dict(threshold=self.threshold),
             )
 
-            per_frame_nan = buffer_by_frame.isnull().any(dim="sample")
+            nan_by_frame = buffer_by_frame.isnull().any(dim="sample")
             del buffer_by_frame
 
             assert encoded.attrs["time_bias"] % samples_per_frame == 0
             encoded.attrs["time_bias"] //= samples_per_frame
-            yield xr.Dataset({"data": encoded, "invalid_data": per_frame_nan})
+            yield xr.Dataset({"data": encoded, "invalid_data": nan_by_frame})
             del encoded
-            del per_frame_nan
+            del nan_by_frame
             # Cut off the piece that's been processed. We then copy the
             # tail piece so that the bulk of the memory can be freed.
             skip = n_frames * samples_per_frame

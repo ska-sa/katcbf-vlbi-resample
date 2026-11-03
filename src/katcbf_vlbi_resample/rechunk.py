@@ -130,7 +130,6 @@ class Rechunk:
             buffer_base += buffer_stop
             buffer_start = 0
             buffer_stop = 0
-            # mypy seems to think buffer could be None at this point
             buffer.attrs["time_bias"] = buffer_base
 
         xp = cp if self.is_cupy else np
