@@ -329,21 +329,14 @@ class TestVDIFFormatter:
 
         # Write the data to an in-memory file
         fh = io.BytesIO()
-        invalid_flags = []
-        frame = None
         async for frameset in fmt:
             for frame in frameset:
-                invalid_flags.append(bool(baseband.vdif.header.VDIFHeader(frame.header)["invalid_data"]))
                 fh.write(frame.header)
                 fh.write(frame.payload)
-        # `v` is the second configured VDIF thread, so its second frame is
-        # the fourth frame received above.
-        assert invalid_flags[:4] == [False, False, False, True]
-        assert not any(invalid_flags[4:])
 
         # Read it back and compare to the original data
         fh.seek(0, 0)
-        with baseband.vdif.open(fh, "rs") as vdif_data:
+        with baseband.vdif.open(fh, "rs", fill_value=np.nan) as vdif_data:
             assert vdif_data.sample_rate == float(1 / time_scale) * u.Hz
             assert vdif_data.samples_per_frame == samples_per_frame
             assert vdif_data.bps == 2
@@ -362,9 +355,6 @@ class TestVDIFFormatter:
             # Align out_data to match the axes of data
             out_data = out_data.reindex_like(data).transpose(*data.dims)
             expected_data = data.as_numpy()
-            # Confirm where we expect data to be valid (not NaN)
-            finite = np.isfinite(expected_data.data)
-            # VDIFEncode2Bit marks an entire frame invalid if any sample is NaN.
-            # The NaN is in the second frame of the `v` pol; mark it accordingly.
-            finite[0, samples_per_frame : 2 * samples_per_frame] = False
-            xr.testing.assert_equal(out_data.where(finite), expected_data.where(finite))
+            # The NaN is in the second frame of `v`, so that whole frame is invalid.
+            expected_data.data[0, samples_per_frame : 2 * samples_per_frame] = np.nan
+            xr.testing.assert_equal(out_data, expected_data)
