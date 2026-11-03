@@ -98,7 +98,7 @@ def test_make_header_bad() -> None:
 
 
 @pytest.fixture
-def input_data(xp) -> xr.DataArray:
+def input_samples(xp) -> xr.DataArray:
     """Input data, as a single chunk."""
     return xr.DataArray(
         xp.tile(xp.arange(-2.5, 3, dtype=xp.float32), 100),
@@ -108,9 +108,9 @@ def input_data(xp) -> xr.DataArray:
 
 
 @pytest.fixture
-def orig_samples(input_data: xr.DataArray, time_base: Time, time_scale: Fraction) -> SimpleStream[xr.DataArray]:
+def orig_samples(input_samples: xr.DataArray, time_base: Time, time_scale: Fraction) -> SimpleStream[xr.DataArray]:
     """Input stream."""
-    return SimpleStream.factory(time_base, time_scale, input_data, 10)
+    return SimpleStream.factory(time_base, time_scale, input_samples, 10)
 
 
 @pytest.fixture
@@ -140,29 +140,36 @@ def aligned_time_base(time_base: Time) -> Time:
 
 
 @pytest.fixture
-def input_dataset(xp, input_data: xr.DataArray) -> xr.Dataset:
-    """Input dataset, whose data-vars have a single (`time`) dimension."""
+def input_frames(xp, samples_per_frame: int) -> xr.Dataset:
+    """Input data, as a single chunk of frames."""
+    # This is artbitarily chosen, but also to exercise the chunking in
+    # :func:`.SimpleStream.factory`.
+    n_frames = 100
+    words_per_frame = samples_per_frame // vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
+
+    data = xr.DataArray(
+        xp.arange(n_frames * words_per_frame, dtype=xp.uint32).reshape(n_frames, words_per_frame),
+        dims=("time", "word"),
+    )
+    invalid_data = xr.DataArray(
+        xp.zeros(n_frames, dtype=xp.bool_),
+        dims=("time",),
+    )
     return xr.Dataset(
-        {
-            "data": input_data,
-            "invalid_data": xr.DataArray(
-                xp.zeros(input_data.sizes["time"], dtype=xp.bool_),
-                dims=input_data.dims,
-            ),
-        },
-        attrs=input_data.attrs,  # This is done to navigate utils.isel_time
+        {"data": data, "invalid_data": invalid_data},
+        attrs={"time_bias": 0},
     )
 
 
 @pytest.fixture
 def orig_frames(
-    input_dataset: xr.Dataset, aligned_time_base: Time, frame_time_scale: Fraction
+    input_frames: xr.Dataset, aligned_time_base: Time, frame_time_scale: Fraction
 ) -> SimpleStream[xr.Dataset]:
     """Input stream as `xr.Dataset`.
 
     This is specifically used in TestVDIFFormatter, where it bypasses VDIFEncode2Bit.
     """
-    return SimpleStream.factory(aligned_time_base, frame_time_scale, input_dataset, 10)
+    return SimpleStream.factory(aligned_time_base, frame_time_scale, input_frames, 10)
 
 
 class TestEncode2Bit:
@@ -199,7 +206,7 @@ class TestVDIFEncode2Bit:
             vdif_writer.VDIFEncode2Bit(orig_samples, samples_per_frame, 1.0)
 
     async def test_success(
-        self, xp, samples_per_frame: int, orig_samples: SimpleStream[xr.DataArray], input_data: xr.DataArray
+        self, xp, samples_per_frame: int, orig_samples: SimpleStream[xr.DataArray], input_samples: xr.DataArray
     ) -> None:
         """Test normal usage."""
         words_per_frame = samples_per_frame // vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
@@ -221,8 +228,8 @@ class TestVDIFEncode2Bit:
         assert (
             concat_data.sizes["time"] * concat_data.sizes["word"] == 480 // vdif_writer.VDIFEncode2Bit.SAMPLES_PER_WORD
         )
-        used_input_data = input_data.isel(time=xp.s_[23:503])
-        expected_encoded = vdif_writer._encode_2bit_words(used_input_data.data, 1.0)
+        used_input_samples = input_samples.isel(time=xp.s_[23:503])
+        expected_encoded = vdif_writer._encode_2bit_words(used_input_samples.data, 1.0)
         expected_encoded = expected_encoded.reshape(-1, words_per_frame)
         xp.testing.assert_array_equal(concat_data.data, expected_encoded)
 
@@ -239,13 +246,13 @@ class TestVDIFEncode2Bit:
         # frame and another in the third frame.
         data[1, frame_midpoint_index, 0] = xp.nan
         data[3, 2 * samples_per_frame + frame_midpoint_index, 1] = xp.nan
-        input_data = xr.DataArray(
+        input_samples = xr.DataArray(
             data,
-            dims=("channel", "time", "pol"),
-            coords={"channel": list(range(N_CHANNELS)), "pol": ["X", "Y"]},
+            dims=("stream", "time", "pol"),
+            coords={"stream": list(range(N_CHANNELS)), "pol": ["X", "Y"]},
             attrs={"time_bias": 0},
         )
-        orig_samples = SimpleStream.factory(time_base, time_scale, input_data)
+        orig_samples = SimpleStream.factory(time_base, time_scale, input_samples)
         enc = vdif_writer.VDIFEncode2Bit(orig_samples, samples_per_frame, TWO_BIT_1_SIGMA)
 
         chunks = [chunk async for chunk in enc]
@@ -253,9 +260,9 @@ class TestVDIFEncode2Bit:
         expected = xp.zeros((N_CHANNELS, n_frames, N_POLS), dtype=xp.bool_)
         expected[1, 0, 0] = True
         expected[3, 2, 1] = True
-        assert invalid_data.dims == ("channel", "time", "pol")
-        xr.testing.assert_equal(invalid_data.coords["channel"], input_data.coords["channel"])
-        xr.testing.assert_equal(invalid_data.coords["pol"], input_data.coords["pol"])
+        assert invalid_data.dims == ("stream", "time", "pol")
+        xr.testing.assert_equal(invalid_data.coords["stream"], input_samples.coords["stream"])
+        xr.testing.assert_equal(invalid_data.coords["pol"], input_samples.coords["pol"])
         xp.testing.assert_array_equal(invalid_data.data, expected)
 
 
@@ -323,6 +330,7 @@ class TestVDIFFormatter:
         # Write the data to an in-memory file
         fh = io.BytesIO()
         invalid_flags = []
+        frame = None
         async for frameset in fmt:
             for frame in frameset:
                 invalid_flags.append(bool(baseband.vdif.header.VDIFHeader(frame.header)["invalid_data"]))
