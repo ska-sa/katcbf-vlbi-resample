@@ -35,6 +35,8 @@ from katcbf_vlbi_resample.utils import fraction_to_time_delta
 from . import SimpleStream
 
 N_POLS = 2
+# NOTE: Use four sidebands to test independent invalid-frame tracking across
+# sidebands. This is a test case, not necessarily a production configuration.
 N_SIDEBANDS = 4
 
 
