@@ -96,6 +96,7 @@ convention = "numpy"
 python_version = "3.12"
 files = ["src", "test"]
 ignore_missing_imports = true
+warn_unused_ignores = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
