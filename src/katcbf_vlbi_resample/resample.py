@@ -137,6 +137,7 @@ def _fir_coeff_win(taps: int, passband: float, ratio: Fraction, window: str = "h
 
 def _upfirdn(h: xr.DataArray, x: xr.DataArray, ratio: Fraction) -> xr.DataArray:
     """Apply upfirdn operation and adjust timestamp attributes."""
+    # TODO: Some values coming in here might be NaN
     x = xrsig.upfirdn(
         h,
         x,
@@ -306,6 +307,7 @@ class Resample:
         buffer = None
         n, d = self._ratio.as_integer_ratio()
         async for input_chunk in self._input_it:
+            # TODO: Avoid filling arbitrarily large gaps with NaNs
             if buffer is None:
                 # TODO: could instead pad on the left, then discard invalid
                 # samples, which would avoid discarding good data.
@@ -313,6 +315,28 @@ class Resample:
                 if buffer is None:
                     continue  # We've trimmed the entire input chunk
             else:
+                expected_start = buffer.attrs["time_bias"] + buffer.sizes["time"]
+                actual_start = input_chunk.attrs["time_bias"]
+                gap = actual_start - expected_start
+
+                if gap < 0:
+                    # Is this even likely to happen?
+                    raise ValueError(f"Input chunk overlaps buffered data by {-gap} sanples")
+
+                if gap > 0:
+                    # TODO: This should be logged as a warning, but no modules use logging yet
+                    # NOTE: The gap could be larger than one `input_chunk`
+                    buffer_sizes = dict(buffer.sizes)
+                    buffer_sizes["time"] = gap
+                    xp = cp.get_array_module(buffer.data)
+                    filler = xr.DataArray(
+                        xp.full(tuple(buffer_sizes.values()), fill_value=xp.nan, dtype=buffer.dtype),
+                        dims=buffer.dims,
+                        coords=buffer.coords,
+                        attrs={**buffer.attrs, "time_bias": expected_start},
+                    )
+                    buffer = concat_time([buffer, filler])
+
                 buffer = concat_time([buffer, input_chunk])
                 del input_chunk
 

@@ -157,6 +157,11 @@ class TestResample:
         """Time scale for input stream."""
         return 1 / Fraction(107e6)
 
+    @pytest.fixture
+    def time_size(self) -> int:
+        """Time samples in an input stream."""
+        return 54321
+
     @pytest.mark.parametrize("chunk_size", [100, 20000])
     async def test_chunk_consistency(
         self,
@@ -167,11 +172,12 @@ class TestResample:
         time_base: Time,
         time_scale: Fraction,
         chunk_size: int,
+        time_size: int,
     ) -> None:
         """Verify that results are not affected by chunk boundaries."""
         rng = xp.random.default_rng(seed=1)
         data = xr.DataArray(
-            complex_random(lambda: rng.uniform(-1.0, 1.0, size=(2, 54321)).astype(xp.float32)),
+            complex_random(lambda: rng.uniform(-1.0, 1.0, size=(2, time_size)).astype(xp.float32)),
             dims=("pol", "time"),
             coords={"pol": ["h", "v"]},
             attrs={"time_bias": 12345},
@@ -186,6 +192,70 @@ class TestResample:
         out2c = xr.concat(out2, dim="time")
         # TODO: the cupy version seems to need a much higher atol to pass.
         xr.testing.assert_allclose(out1c, out2c, atol=1e-5)
+
+    async def test_gap_filled_with_nans(
+        self,
+        xp,
+        output_bandwidth: float,
+        mixer_frequency: float,
+        resample_params: ResampleParameters,
+        time_base: Time,
+        time_scale: Fraction,
+        time_size: int,
+    ) -> None:
+        """Verify that gaps in the input are filled with NaNs."""
+        rng = xp.random.default_rng(seed=1)
+        data = xr.DataArray(
+            complex_random(lambda: rng.uniform(-1.0, 1.0, size=(2, time_size)).astype(xp.float32)),
+            dims=("pol", "time"),
+            coords={"pol": ["h", "v"]},
+            attrs={"time_bias": 12345},
+        )
+        # Split the data into two chunks then create a gap between them
+        gap_start = time_size // 3
+        chunk_sizes = [gap_start, time_size - gap_start]
+        orig_stream = SimpleStream.factory(time_base, time_scale, data, chunk_sizes)
+        gap_size = 1000
+        chunks = list(orig_stream.chunks)
+        second_chunk = chunks[1]
+        # Shift the second chunk forward in time to create the gap
+        second_chunk.attrs = {
+            **second_chunk.attrs,
+            "time_bias": second_chunk.attrs["time_bias"] + gap_size,
+        }
+
+        filler = xr.DataArray(
+            xp.full((2, gap_size), xp.nan + 1j * xp.nan, dtype=data.dtype),
+            dims=data.dims,
+            coords=data.coords,
+        )
+        reference_data: xr.DataArray = xr.concat(
+            [
+                data.isel(time=slice(0, gap_start)),
+                filler,
+                data.isel(time=slice(gap_start, None)),
+            ],
+            dim="time",
+        ).assign_attrs(dict(data.attrs))
+        # The reference_stream chunk sizes need to account for the "left-padding" of the
+        # gap in data introduced.
+        reference_stream = SimpleStream.factory(
+            time_base, time_scale, reference_data, [gap_start, gap_size + time_size - gap_start]
+        )
+
+        orig_resample = Resample(output_bandwidth, mixer_frequency, resample_params, orig_stream)
+        reference_resample = Resample(output_bandwidth, mixer_frequency, resample_params, reference_stream)
+        orig_out = concat_time([chunk async for chunk in orig_resample])
+        reference_out = concat_time([chunk async for chunk in reference_resample])
+
+        assert orig_out.attrs["time_bias"] == reference_out.attrs["time_bias"]
+        assert orig_out.sizes["time"] == reference_out.sizes["time"]
+        # NOTE: Cannot do DataArray.isnull because cupy requires copying to host first
+        xp.testing.assert_array_equal(xp.isnan(orig_out.data), xp.isnan(reference_out.data))
+        # Mask the two non-NaN locations to ensure neither `orig_out` nor `reference_out`
+        # have been corrupted by the NaNs in the input.
+        finite = xp.isfinite(orig_out.data) & xp.isfinite(reference_out.data)
+        xp.testing.assert_allclose(orig_out.data[finite], reference_out.data[finite], atol=1e-5)
 
     async def test_group_delay(
         self,
