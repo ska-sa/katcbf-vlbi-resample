@@ -28,6 +28,8 @@ from katcbf_vlbi_resample.utils import concat_time
 
 from . import SimpleStream, complex_random
 
+TIME_SIZE = 54321
+
 
 class TestClipTime:
     """Test :class:`.ClipTime`."""
@@ -157,11 +159,6 @@ class TestResample:
         """Time scale for input stream."""
         return 1 / Fraction(107e6)
 
-    @pytest.fixture
-    def time_size(self) -> int:
-        """Time samples in an input stream."""
-        return 54321
-
     @pytest.mark.parametrize("chunk_size", [100, 20000])
     async def test_chunk_consistency(
         self,
@@ -172,12 +169,11 @@ class TestResample:
         time_base: Time,
         time_scale: Fraction,
         chunk_size: int,
-        time_size: int,
     ) -> None:
         """Verify that results are not affected by chunk boundaries."""
         rng = xp.random.default_rng(seed=1)
         data = xr.DataArray(
-            complex_random(lambda: rng.uniform(-1.0, 1.0, size=(2, time_size)).astype(xp.float32)),
+            complex_random(lambda: rng.uniform(-1.0, 1.0, size=(2, TIME_SIZE)).astype(xp.float32)),
             dims=("pol", "time"),
             coords={"pol": ["h", "v"]},
             attrs={"time_bias": 12345},
@@ -201,19 +197,18 @@ class TestResample:
         resample_params: ResampleParameters,
         time_base: Time,
         time_scale: Fraction,
-        time_size: int,
     ) -> None:
         """Verify that gaps in the input are filled with NaNs."""
         rng = xp.random.default_rng(seed=1)
         data = xr.DataArray(
-            complex_random(lambda: rng.uniform(-1.0, 1.0, size=(2, time_size)).astype(xp.float32)),
+            complex_random(lambda: rng.uniform(-1.0, 1.0, size=(2, TIME_SIZE)).astype(xp.float32)),
             dims=("pol", "time"),
             coords={"pol": ["h", "v"]},
             attrs={"time_bias": 12345},
         )
         # Split the data into two chunks then create a gap between them
-        gap_start = time_size // 3
-        chunk_sizes = [gap_start, time_size - gap_start]
+        gap_start = TIME_SIZE // 3
+        chunk_sizes = [gap_start, TIME_SIZE - gap_start]
         orig_stream = SimpleStream.factory(time_base, time_scale, data, chunk_sizes)
         gap_size = 1000
         chunks = list(orig_stream.chunks)
@@ -240,7 +235,7 @@ class TestResample:
         # The reference_stream chunk sizes need to account for the "left-padding" of the
         # gap in data introduced.
         reference_stream = SimpleStream.factory(
-            time_base, time_scale, reference_data, [gap_start, gap_size + time_size - gap_start]
+            time_base, time_scale, reference_data, [gap_start, gap_size + TIME_SIZE - gap_start]
         )
 
         orig_resample = Resample(output_bandwidth, mixer_frequency, resample_params, orig_stream)
