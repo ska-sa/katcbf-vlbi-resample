@@ -327,8 +327,7 @@ class Resample:
                 if gap < 0:
                     # Points to a bug in the upstream
                     raise ValueError(f"Input chunk overlaps buffered data by {-gap} samples")
-
-                if gap > 0:
+                elif gap > 0:
                     logger.debug(f"Input chunk has a gap of {gap} samples from buffered data")
                     # NOTE: The gap could be larger than one `input_chunk`
                     buffer_sizes = dict(buffer.sizes)
@@ -340,9 +339,9 @@ class Resample:
                         coords=buffer.coords,
                         attrs={**buffer.attrs, "time_bias": expected_start},
                     )
-                    buffer = concat_time([buffer, filler])
-
-                buffer = concat_time([buffer, input_chunk])
+                    buffer = concat_time([buffer, filler, input_chunk])
+                else:
+                    buffer = concat_time([buffer, input_chunk])
                 del input_chunk
 
             n_time = buffer.sizes["time"]
