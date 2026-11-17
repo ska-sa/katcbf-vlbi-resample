@@ -245,12 +245,7 @@ class TestResample:
 
         assert orig_out.attrs["time_bias"] == reference_out.attrs["time_bias"]
         assert orig_out.sizes["time"] == reference_out.sizes["time"]
-        # NOTE: Cannot do DataArray.isnull because cupy requires copying to host first
-        xp.testing.assert_array_equal(xp.isnan(orig_out.data), xp.isnan(reference_out.data))
-        # Mask the two non-NaN locations to ensure neither `orig_out` nor `reference_out`
-        # have been corrupted by the NaNs in the input.
-        finite = xp.isfinite(orig_out.data) & xp.isfinite(reference_out.data)
-        xp.testing.assert_allclose(orig_out.data[finite], reference_out.data[finite], atol=1e-5)
+        xp.testing.assert_allclose(orig_out.data, reference_out.data)
 
     async def test_group_delay(
         self,
