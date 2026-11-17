@@ -16,6 +16,7 @@
 
 """Signal processing algorithms."""
 
+import logging
 from collections.abc import AsyncIterator
 from fractions import Fraction
 
@@ -29,6 +30,8 @@ from . import xrsig
 from .parameters import ResampleParameters
 from .stream import ChunkwiseStream, Stream
 from .utils import as_cupy, concat_time, isel_time, time_align
+
+logger = logging.getLogger(__name__)
 
 
 def _time_delta_to_sample(dt: TimeDelta, time_scale: Fraction) -> int:
@@ -137,7 +140,7 @@ def _fir_coeff_win(taps: int, passband: float, ratio: Fraction, window: str = "h
 
 def _upfirdn(h: xr.DataArray, x: xr.DataArray, ratio: Fraction) -> xr.DataArray:
     """Apply upfirdn operation and adjust timestamp attributes."""
-    # TODO: Some values coming in here might be NaN
+    # NOTE: Some values coming in here might be NaN
     x = xrsig.upfirdn(
         h,
         x,
@@ -248,9 +251,11 @@ class Resample:
     due to windowing effects.
 
     Each input array must have a `time` dimension, and it must have
-    a coordinate that contains consecutive integers. Each subsequent
-    chunk must also follow on contiguously from the previous one. Chunks need
-    not be the same size. Input samples are expected to be complex values.
+    a coordinate that contains consecutive integers. Input arrays (chunks) may
+    be separated by gaps in time. Missing chunks are back-filled with NaNs.
+    Missing data within input arrays is expected to be represented by NaNs.
+    Input arrays must not overlap in time, and their sizes may vary. Input
+    samples are expected to be complex values.
 
     The output has an additional `sideband` dimension to indicate the lower
     (`lsb`) or upper (`usb`) sideband. Output samples are real.
@@ -320,11 +325,11 @@ class Resample:
                 gap = actual_start - expected_start
 
                 if gap < 0:
-                    # Is this even likely to happen?
-                    raise ValueError(f"Input chunk overlaps buffered data by {-gap} sanples")
+                    # Points to a bug in the upstream
+                    raise ValueError(f"Input chunk overlaps buffered data by {-gap} samples")
 
                 if gap > 0:
-                    # TODO: This should be logged as a warning, but no modules use logging yet
+                    logger.debug(f"Input chunk has a gap of {gap} samples from buffered data")
                     # NOTE: The gap could be larger than one `input_chunk`
                     buffer_sizes = dict(buffer.sizes)
                     buffer_sizes["time"] = gap
