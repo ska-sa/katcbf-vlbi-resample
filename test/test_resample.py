@@ -206,37 +206,15 @@ class TestResample:
             coords={"pol": ["h", "v"]},
             attrs={"time_bias": 12345},
         )
-        # Split the data into two chunks then create a gap between them
-        gap_start = TIME_SIZE // 3
-        chunk_sizes = [gap_start, TIME_SIZE - gap_start]
-        orig_stream = SimpleStream.factory(time_base, time_scale, data, chunk_sizes)
-        gap_size = 1000
+        chunk_size = TIME_SIZE // 3
+        orig_stream = SimpleStream.factory(time_base, time_scale, data, chunk_size)
         chunks = list(orig_stream.chunks)
-        second_chunk = chunks[1]
-        # Shift the second chunk forward in time to create the gap
-        second_chunk.attrs = {
-            **second_chunk.attrs,
-            "time_bias": second_chunk.attrs["time_bias"] + gap_size,
-        }
+        orig_stream.chunks = [chunks[0], chunks[2]]
 
-        filler = xr.DataArray(
-            xp.full((2, gap_size), xp.nan + 1j * xp.nan, dtype=data.dtype),
-            dims=data.dims,
-            coords=data.coords,
-        )
-        reference_data: xr.DataArray = xr.concat(
-            [
-                data.isel(time=slice(0, gap_start)),
-                filler,
-                data.isel(time=slice(gap_start, None)),
-            ],
-            dim="time",
-        ).assign_attrs(dict(data.attrs))
-        # The reference_stream chunk sizes need to account for the "left-padding" of the
-        # gap in data introduced.
-        reference_stream = SimpleStream.factory(
-            time_base, time_scale, reference_data, [gap_start, gap_size + TIME_SIZE - gap_start]
-        )
+        reference_stream = SimpleStream.factory(time_base, time_scale, data, chunk_size)
+        reference_chunks = list(reference_stream.chunks)
+        reference_chunks[1] = xr.full_like(reference_chunks[1], xp.nan + 1j * xp.nan)
+        reference_stream.chunks = reference_chunks
 
         orig_resample = Resample(output_bandwidth, mixer_frequency, resample_params, orig_stream)
         reference_resample = Resample(output_bandwidth, mixer_frequency, resample_params, reference_stream)
@@ -245,6 +223,7 @@ class TestResample:
 
         assert orig_out.attrs["time_bias"] == reference_out.attrs["time_bias"]
         assert orig_out.sizes["time"] == reference_out.sizes["time"]
+        assert xp.isnan(orig_out.data).any()
         xp.testing.assert_allclose(orig_out.data, reference_out.data)
 
     async def test_group_delay(
