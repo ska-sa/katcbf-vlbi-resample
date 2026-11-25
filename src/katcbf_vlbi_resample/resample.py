@@ -189,6 +189,9 @@ def _hilbert_coeff_win(N: int, window: str = "hamming") -> xr.DataArray:
 def _split_sidebands(data: xr.DataArray, coeff: xr.DataArray) -> xr.DataArray:
     """Split a complex signal into lower and upper sidebands.
 
+    A separate path handles NaNs in the input `data` to prevent them
+    from contaminating otherwise valid output samples.
+
     Parameters
     ----------
     data
@@ -203,7 +206,25 @@ def _split_sidebands(data: xr.DataArray, coeff: xr.DataArray) -> xr.DataArray:
         An array of real data, with an extra `sideband` dimension with labels
         `lsb` and `usb`.
     """
-    h = xrsig.convolve1d(data.imag, coeff, dim="time", mode="valid")
+    imag = data.imag
+    xp = cp.get_array_module(imag.data)
+    missing = xp.isnan(imag.data)
+    if bool(missing.any()):
+        # FFT convolution spreads NaNs across the whole output. Zero-fill them
+        # for the convolution, then propagate the mask over the filter width.
+        imag = imag.copy(data=xp.where(missing, 0, imag.data))
+        h = xrsig.convolve1d(imag, coeff, dim="time", mode="valid")
+        missing_data = imag.copy(data=missing.astype(xp.float32))
+        # An all-ones kernel counts missing inputs in each Hilbert window.
+        # Any nonzero count means that output depends on at least one NaN.
+        support = coeff.copy(data=xp.ones_like(coeff.data, dtype=xp.float32))
+        missing_h = xrsig.convolve1d(missing_data, support, dim="time", mode="valid")
+        # NOTE: Each window count is zero or at least one, so 0.5 separates
+        # unaffected outputs from affected ones, regardless of the method used
+        # by convolve1d.
+        h = h.where(missing_h < 0.5)
+    else:
+        h = xrsig.convolve1d(imag, coeff, dim="time", mode="valid")
     # Trim the edges of 'data' to make it match up with h
     trim = coeff.sizes["time"] // 2
     data = isel_time(data, np.s_[trim:-trim])
