@@ -213,10 +213,6 @@ class TestResample:
         orig_stream.chunks = [chunks[0], chunks[2]]
 
         reference_stream = SimpleStream.factory(time_base, time_scale, data, chunk_size)
-        reference_chunks = list(reference_stream.chunks)
-        reference_chunks[1] = xr.full_like(reference_chunks[1], xp.nan + 1j * xp.nan)
-        reference_stream.chunks = reference_chunks
-
         orig_resample = Resample(output_bandwidth, mixer_frequency, resample_params, orig_stream)
         reference_resample = Resample(output_bandwidth, mixer_frequency, resample_params, reference_stream)
         orig_out = concat_time([chunk async for chunk in orig_resample])
@@ -224,67 +220,37 @@ class TestResample:
 
         assert orig_out.attrs["time_bias"] == reference_out.attrs["time_bias"]
         assert orig_out.sizes["time"] == reference_out.sizes["time"]
-        assert xp.isnan(orig_out.data).any()
-        xp.testing.assert_allclose(orig_out.data, reference_out.data, atol=1e-5)
 
-    async def test_nan_propagation(
-        self,
-        xp,
-        output_bandwidth: float,
-        mixer_frequency: float,
-        resample_params: ResampleParameters,
-        time_base: Time,
-        time_scale: Fraction,
-    ) -> None:
-        """Check that NaNs spread only as far as the filters' supports.
-
-        Verify one missing input sample affects only outputs within both filter supports.
-        """
-        rng = xp.random.default_rng(seed=1)
-        nan_input_index = TIME_SIZE // 2
-        data = xr.DataArray(
-            complex_random(lambda: rng.uniform(-1.0, 1.0, size=(2, TIME_SIZE)).astype(xp.float32)),
-            dims=("pol", "time"),
-            coords={"pol": ["h", "v"]},
-            attrs={"time_bias": TIME_BIAS},
-        )
-        data.data[0, nan_input_index] = xp.nan + 1j * xp.nan
-        orig = SimpleStream.factory(time_base, time_scale, data)
-        resample = Resample(output_bandwidth, mixer_frequency, resample_params, orig)
-        out = concat_time([chunk async for chunk in resample])
-
-        n, d = resample._ratio.as_integer_ratio()
+        n, d = orig_resample._ratio.as_integer_ratio()
         # Polyphase upfirdn pads the FIR to a multiple of `n`, so use its
         # effective length when finding the last output touched by the NaN.
         padded_fir_taps = ((resample_params.fir_taps + n - 1) // n) * n
 
-        # time_align removes this many leading inputs to put time_bias on the
-        # phase required by upfirdn; the NaN's index shifts by the same amount.
-        # See :func:`katcbf_vlbi_resample.utils.time_align` usage.
-        align_trim = (resample._time_bias_mod - data.attrs["time_bias"]) % d
-        aligned_nan_index = nan_input_index - align_trim
+        # :func:`katcbf_vlbi_resample.utils.time_align` removes this many leading
+        # samples to align it in time; the NaNs' index shifts by the same amount.
+        align_trim = (orig_resample._time_bias_mod - TIME_BIAS) % d
+        missing_start = chunk_size - align_trim
+        missing_stop = 2 * chunk_size - align_trim
 
         # For an input at index q, upfirdn output k uses it when the FIR tap
         # index k*d - q*n is in [0, padded_fir_taps). These are the first
         # affected output and the exclusive end of the affected interval.
-        fir_start = (aligned_nan_index * n + d - 1) // d
-        fir_stop = (aligned_nan_index * n + padded_fir_taps - 1) // d + 1
+        fir_start = (missing_start * n + d - 1) // d
+        fir_stop = ((missing_stop - 1) * n + padded_fir_taps - 1) // d + 1
 
         # Each valid Hilbert output uses hilbert_taps consecutive FIR outputs.
         # Thus a NaN at FIR index k affects windows starting at k - (H - 1) through
         # k. Then remove the startup outputs that Resample discards on the left.
-        expected_start = fir_start - (resample_params.hilbert_taps - 1) - resample._fir_discard_left
-        expected_stop = fir_stop - resample._fir_discard_left
+        expected_start = fir_start - (resample_params.hilbert_taps - 1) - orig_resample._fir_discard_left
+        expected_stop = fir_stop - orig_resample._fir_discard_left
 
-        expected_nan = xp.zeros(out.sizes["time"], dtype=bool)
+        expected_nan = xp.zeros(orig_out.sizes["time"], dtype=bool)
         expected_nan[expected_start:expected_stop] = True
 
-        # The footprint is the same in each sideband. Expand the time mask to
-        # the exact (sideband, time) shape; reshape alone would only add an axis
-        # and array_equal requires both arrays to have matching shapes.
-        actual_nan = xp.isnan(out.sel(pol="h").data)
-        xp.testing.assert_array_equal(actual_nan, xp.broadcast_to(expected_nan, actual_nan.shape))
-        assert not xp.isnan(out.sel(pol="v").data).any()
+        # `expected_nan` only has a "time" dimension. `xp.where` broadcasts
+        # its values across the leading dimensions in `reference_out`.
+        expected = xp.where(expected_nan, xp.nan, reference_out.data)
+        xp.testing.assert_allclose(orig_out.data, expected, atol=1e-5)
 
     async def test_group_delay(
         self,

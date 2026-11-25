@@ -335,8 +335,6 @@ class Resample:
         async for input_chunk in self._input_it:
             # TODO: Avoid filling arbitrarily large gaps with NaNs
             if buffer is None:
-                # TODO: could instead pad on the left, then discard invalid
-                # samples, which would avoid discarding good data.
                 buffer = time_align(input_chunk, d, self._time_bias_mod)
                 if buffer is None:
                     continue  # We've trimmed the entire input chunk
