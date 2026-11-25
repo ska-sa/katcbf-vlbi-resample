@@ -16,6 +16,7 @@
 
 """Signal processing algorithms."""
 
+import logging
 from collections.abc import AsyncIterator
 from fractions import Fraction
 
@@ -29,6 +30,8 @@ from . import xrsig
 from .parameters import ResampleParameters
 from .stream import ChunkwiseStream, Stream
 from .utils import as_cupy, concat_time, isel_time, time_align
+
+logger = logging.getLogger(__name__)
 
 
 def _time_delta_to_sample(dt: TimeDelta, time_scale: Fraction) -> int:
@@ -137,6 +140,7 @@ def _fir_coeff_win(taps: int, passband: float, ratio: Fraction, window: str = "h
 
 def _upfirdn(h: xr.DataArray, x: xr.DataArray, ratio: Fraction) -> xr.DataArray:
     """Apply upfirdn operation and adjust timestamp attributes."""
+    # NOTE: Some values coming in here might be NaN
     x = xrsig.upfirdn(
         h,
         x,
@@ -185,6 +189,9 @@ def _hilbert_coeff_win(N: int, window: str = "hamming") -> xr.DataArray:
 def _split_sidebands(data: xr.DataArray, coeff: xr.DataArray) -> xr.DataArray:
     """Split a complex signal into lower and upper sidebands.
 
+    A separate path handles NaNs in the input `data` to prevent them
+    from contaminating otherwise valid output samples.
+
     Parameters
     ----------
     data
@@ -199,7 +206,25 @@ def _split_sidebands(data: xr.DataArray, coeff: xr.DataArray) -> xr.DataArray:
         An array of real data, with an extra `sideband` dimension with labels
         `lsb` and `usb`.
     """
-    h = xrsig.convolve1d(data.imag, coeff, dim="time", mode="valid")
+    imag = data.imag
+    xp = cp.get_array_module(imag.data)
+    missing = xp.isnan(imag.data)
+    if bool(missing.any()):
+        # FFT convolution spreads NaNs across the whole output. Zero-fill them
+        # for the convolution, then propagate the mask over the filter width.
+        imag = imag.copy(data=xp.where(missing, 0, imag.data))
+        h = xrsig.convolve1d(imag, coeff, dim="time", mode="valid")
+        missing_data = imag.copy(data=missing.astype(xp.float32))
+        # An all-ones kernel counts missing inputs in each Hilbert window.
+        # Any nonzero count means that output depends on at least one NaN.
+        support = coeff.copy(data=xp.ones_like(coeff.data, dtype=xp.float32))
+        missing_h = xrsig.convolve1d(missing_data, support, dim="time", mode="valid")
+        # NOTE: Each window count is zero or at least one, so 0.5 separates
+        # unaffected outputs from affected ones, regardless of the method used
+        # by convolve1d.
+        h = h.where(missing_h < 0.5)
+    else:
+        h = xrsig.convolve1d(imag, coeff, dim="time", mode="valid")
     # Trim the edges of 'data' to make it match up with h
     trim = coeff.sizes["time"] // 2
     data = isel_time(data, np.s_[trim:-trim])
@@ -247,9 +272,11 @@ class Resample:
     due to windowing effects.
 
     Each input array must have a `time` dimension, and it must have
-    a coordinate that contains consecutive integers. Each subsequent
-    chunk must also follow on contiguously from the previous one. Chunks need
-    not be the same size. Input samples are expected to be complex values.
+    a coordinate that contains consecutive integers. Input arrays (chunks) may
+    be separated by gaps in time. Missing chunks are back-filled with NaNs.
+    Missing data within input arrays is expected to be represented by NaNs.
+    Input arrays must not overlap in time, and their sizes may vary. Input
+    samples are expected to be complex values.
 
     The output has an additional `sideband` dimension to indicate the lower
     (`lsb`) or upper (`usb`) sideband. Output samples are real.
@@ -306,14 +333,34 @@ class Resample:
         buffer = None
         n, d = self._ratio.as_integer_ratio()
         async for input_chunk in self._input_it:
+            # TODO: Avoid filling arbitrarily large gaps with NaNs
             if buffer is None:
-                # TODO: could instead pad on the left, then discard invalid
-                # samples, which would avoid discarding good data.
                 buffer = time_align(input_chunk, d, self._time_bias_mod)
                 if buffer is None:
                     continue  # We've trimmed the entire input chunk
             else:
-                buffer = concat_time([buffer, input_chunk])
+                expected_start = buffer.attrs["time_bias"] + buffer.sizes["time"]
+                actual_start = input_chunk.attrs["time_bias"]
+                gap = actual_start - expected_start
+
+                if gap < 0:
+                    # Points to a bug in the upstream
+                    raise ValueError(f"Input chunk overlaps buffered data by {-gap} samples")
+                elif gap > 0:
+                    logger.debug(f"Input chunk has a gap of {gap} samples from buffered data")
+                    # NOTE: The gap could be larger than one `input_chunk`
+                    buffer_sizes = dict(buffer.sizes)
+                    buffer_sizes["time"] = gap
+                    xp = cp.get_array_module(buffer.data)
+                    filler = xr.DataArray(
+                        xp.full(tuple(buffer_sizes.values()), fill_value=xp.nan, dtype=buffer.dtype),
+                        dims=buffer.dims,
+                        coords=buffer.coords,
+                        attrs={**buffer.attrs, "time_bias": expected_start},
+                    )
+                    buffer = concat_time([buffer, filler, input_chunk])
+                else:
+                    buffer = concat_time([buffer, input_chunk])
                 del input_chunk
 
             n_time = buffer.sizes["time"]

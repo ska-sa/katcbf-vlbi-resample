@@ -28,6 +28,9 @@ from katcbf_vlbi_resample.utils import concat_time
 
 from . import SimpleStream, complex_random
 
+TIME_SIZE = 54321
+TIME_BIAS = 12345
+
 
 class TestClipTime:
     """Test :class:`.ClipTime`."""
@@ -171,10 +174,10 @@ class TestResample:
         """Verify that results are not affected by chunk boundaries."""
         rng = xp.random.default_rng(seed=1)
         data = xr.DataArray(
-            complex_random(lambda: rng.uniform(-1.0, 1.0, size=(2, 54321)).astype(xp.float32)),
+            complex_random(lambda: rng.uniform(-1.0, 1.0, size=(2, TIME_SIZE)).astype(xp.float32)),
             dims=("pol", "time"),
             coords={"pol": ["h", "v"]},
-            attrs={"time_bias": 12345},
+            attrs={"time_bias": TIME_BIAS},
         )
         orig1 = SimpleStream.factory(time_base, time_scale, data)
         orig2 = SimpleStream.factory(time_base, time_scale, data, chunk_size)
@@ -186,6 +189,68 @@ class TestResample:
         out2c = xr.concat(out2, dim="time")
         # TODO: the cupy version seems to need a much higher atol to pass.
         xr.testing.assert_allclose(out1c, out2c, atol=1e-5)
+
+    async def test_gap_filled_with_nans(
+        self,
+        xp,
+        output_bandwidth: float,
+        mixer_frequency: float,
+        resample_params: ResampleParameters,
+        time_base: Time,
+        time_scale: Fraction,
+    ) -> None:
+        """Verify that gaps in the input are filled with NaNs."""
+        rng = xp.random.default_rng(seed=1)
+        data = xr.DataArray(
+            complex_random(lambda: rng.uniform(-1.0, 1.0, size=(2, TIME_SIZE)).astype(xp.float32)),
+            dims=("pol", "time"),
+            coords={"pol": ["h", "v"]},
+            attrs={"time_bias": TIME_BIAS},
+        )
+        chunk_size = TIME_SIZE // 3
+        orig_stream = SimpleStream.factory(time_base, time_scale, data, chunk_size)
+        chunks = list(orig_stream.chunks)
+        orig_stream.chunks = [chunks[0], chunks[2]]
+
+        reference_stream = SimpleStream.factory(time_base, time_scale, data, chunk_size)
+        orig_resample = Resample(output_bandwidth, mixer_frequency, resample_params, orig_stream)
+        reference_resample = Resample(output_bandwidth, mixer_frequency, resample_params, reference_stream)
+        orig_out = concat_time([chunk async for chunk in orig_resample])
+        reference_out = concat_time([chunk async for chunk in reference_resample])
+
+        assert orig_out.attrs["time_bias"] == reference_out.attrs["time_bias"]
+        assert orig_out.sizes["time"] == reference_out.sizes["time"]
+
+        n, d = orig_resample._ratio.as_integer_ratio()
+        # Polyphase upfirdn pads the FIR to a multiple of `n`, so use its
+        # effective length when finding the last output touched by the NaN.
+        padded_fir_taps = ((resample_params.fir_taps + n - 1) // n) * n
+
+        # :func:`katcbf_vlbi_resample.utils.time_align` removes this many leading
+        # samples to align it in time; the NaNs' index shifts by the same amount.
+        align_trim = (orig_resample._time_bias_mod - TIME_BIAS) % d
+        missing_start = chunk_size - align_trim
+        missing_stop = 2 * chunk_size - align_trim
+
+        # For an input at index q, upfirdn output k uses it when the FIR tap
+        # index k*d - q*n is in [0, padded_fir_taps). These are the first
+        # affected output and the exclusive end of the affected interval.
+        fir_start = (missing_start * n + d - 1) // d
+        fir_stop = ((missing_stop - 1) * n + padded_fir_taps - 1) // d + 1
+
+        # Each valid Hilbert output uses hilbert_taps consecutive FIR outputs.
+        # Thus a NaN at FIR index k affects windows starting at k - (H - 1) through
+        # k. Then remove the startup outputs that Resample discards on the left.
+        expected_start = fir_start - (resample_params.hilbert_taps - 1) - orig_resample._fir_discard_left
+        expected_stop = fir_stop - orig_resample._fir_discard_left
+
+        expected_nan = xp.zeros(orig_out.sizes["time"], dtype=bool)
+        expected_nan[expected_start:expected_stop] = True
+
+        # `expected_nan` only has a "time" dimension. `xp.where` broadcasts
+        # its values across the leading dimensions in `reference_out`.
+        expected = xp.where(expected_nan, xp.nan, reference_out.data)
+        xp.testing.assert_allclose(orig_out.data, expected, atol=1e-5)
 
     async def test_group_delay(
         self,
@@ -200,7 +265,7 @@ class TestResample:
         # Frequencies relative to the centre frequency
         freqs = [-28e6, -18e6, 17e6, 22e6]
         n = 100000
-        attrs = {"time_bias": 12345}
+        attrs = {"time_bias": TIME_BIAS}
         t = (xp.arange(n) + float(attrs["time_bias"])) * float(time_scale)
         tones = xp.stack([xp.exp(2j * xp.pi * f * t) for f in freqs])
         data = xr.DataArray(
